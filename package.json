@@ -28,6 +28,7 @@
     "clsx": "^2.1.1",
     "date-fns": "^3.6.0",
     "framer-motion": "^12.40.0",
+    "git-filter-repo": "^0.0.30",
     "input-otp": "^1.4.2",
     "jspdf": "^4.2.1",
     "lucide-react": "^1.18.0",
