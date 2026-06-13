@@ -27,5 +27,3 @@ const Toaster = ({
 }
 
 export { Toaster }
-
-
