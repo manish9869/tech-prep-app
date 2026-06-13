@@ -15,7 +15,7 @@ import {
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
-
+import { updateStreak } from '@/lib/updateStreak';
 export default function QuestionDetailPage() {
     const { questionId } = useParams();
     const navigate = useNavigate();
@@ -40,8 +40,20 @@ export default function QuestionDetailPage() {
     useEffect(() => { setNoteText(currentNote?.content || ''); }, [currentNote?.id, q?.id]);
 
     const completeMut = useMutation({
-        mutationFn: () => Progress.create({ user_id: user.id, question_id: q.id, topic_id: q.topic_id, completed_at: new Date().toISOString() }),
-        onSuccess: () => { qc.invalidateQueries({ queryKey: ['progress'] }); toast.success('Marked as completed!'); },
+        mutationFn: async () => {
+            await Progress.create({
+                user_id: user.id,
+                question_id: q.id,
+                topic_id: q.topic_id,
+                completed_at: new Date().toISOString()
+            });
+            await updateStreak(user.id); // ← add this
+        },
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ['progress'] });
+            qc.invalidateQueries({ queryKey: ['me'] }); // ← refresh user so streak shows
+            toast.success('Marked as completed! 🔥');
+        },
     });
     const bookmarkMut = useMutation({
         mutationFn: () => {

@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 import { useQuery } from '@tanstack/react-query';
 import { Topic, ResumeAnalysis } from '@/api/entities';
 import { supabase } from '@/api/supabaseClient';
-import { invokeLLM } from '@/api/llm';
+import { invokeResumeAnalysis } from '@/api/llm';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import mammoth from 'mammoth';
@@ -39,16 +39,28 @@ const FOCUS_AREAS = [
     { value: 'salary_insights', label: 'Salary Benchmarks', icon: '💰' },
 ];
 
+const MAX_FILE_SIZE_MB = 10;
 async function uploadFileToSupabase(file) {
     const ext = file.name.split('.').pop();
     const path = `resumes/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-    const { error } = await supabase.storage.from('uploads').upload(path, file);
-    if (error) throw error;
-    const { data } = supabase.storage.from('uploads').getPublicUrl(path);
-    return data.publicUrl;
-}
 
-// ── Extract plain text from PDF / DOCX / DOC / TXT ────────────────────────────
+    console.log('⬆️ Uploading to path:', path); // ADD THIS
+
+    const { data, error } = await supabase.storage  // capture data too
+        .from('uploads')
+        .upload(path, file, {
+            cacheControl: '3600',
+            upsert: false,
+        });
+
+    console.log('Upload result:', { data, error }); // ADD THIS
+
+    if (error) throw new Error('File upload failed: ' + error.message);
+
+    const { data: urlData } = supabase.storage.from('uploads').getPublicUrl(path);
+    console.log('Public URL:', urlData.publicUrl); // ADD THIS
+    return urlData.publicUrl;
+}
 async function extractTextFromFile(file) {
     const ext = file.name.split('.').pop().toLowerCase();
 
@@ -75,11 +87,10 @@ async function extractTextFromFile(file) {
     }
 
     if (ext === 'doc') {
-        // mammoth doesn't support legacy .doc; best-effort fallback
-        throw new Error('Legacy .doc files are not supported for text extraction. Please upload PDF, DOCX, or TXT.');
+        throw new Error('Legacy .doc files are not supported. Please convert to PDF, DOCX, or TXT.');
     }
 
-    throw new Error('Unsupported file type');
+    throw new Error(`Unsupported file type ".${ext}". Please upload PDF, DOCX, or TXT.`);
 }
 
 export default function ResumeUploadPanel({ user, onComplete, analyzing, setAnalyzing }) {
@@ -89,26 +100,27 @@ export default function ResumeUploadPanel({ user, onComplete, analyzing, setAnal
     const [experienceLevel, setExperienceLevel] = useState('junior');
     const [interviewType, setInterviewType] = useState('fullstack');
     const [focusAreas, setFocusAreas] = useState(['ats_optimization', 'interview_prep']);
-    const [questionCount, setQuestionCount] = useState(15);
+    const [questionCount, setQuestionCount] = useState(10);
     const [dragOver, setDragOver] = useState(false);
     const fileRef = useRef();
 
-    const { data: topics = [] } = useQuery({
-        queryKey: ['topics'],
-        queryFn: () => Topic.list(),
-    });
-
     const handleFile = (f) => {
         if (!f) return;
+        if (f.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
+            toast.error(`File too large. Max size is ${MAX_FILE_SIZE_MB}MB.`);
+            return;
+        }
         if (!f.name.match(/\.(pdf|doc|docx|txt)$/i)) {
-            toast.error('Please upload a PDF, DOC, DOCX, or TXT file');
+            toast.error('Please upload a PDF, DOCX, or TXT file');
             return;
         }
         setFile(f);
     };
 
     const toggleFocus = (val) => {
-        setFocusAreas(prev => prev.includes(val) ? prev.filter(x => x !== val) : [...prev, val]);
+        setFocusAreas(prev =>
+            prev.includes(val) ? prev.filter(x => x !== val) : [...prev, val]
+        );
     };
 
     const handleAnalyze = async () => {
@@ -117,22 +129,22 @@ export default function ResumeUploadPanel({ user, onComplete, analyzing, setAnal
         setAnalyzing(true);
 
         try {
-            // Extract resume text and upload file in parallel
             const [resumeText, file_url] = await Promise.all([
                 extractTextFromFile(file),
                 uploadFileToSupabase(file),
             ]);
 
             if (!resumeText || resumeText.trim().length < 50) {
-                throw new Error('Could not extract readable text from this file. Try a different file.');
+                throw new Error('Could not extract readable text from this file. Try a different format.');
             }
 
-            // Truncate to keep prompt within token limits
             const truncatedResumeText = resumeText.slice(0, 8000);
-
             const expInfo = EXPERIENCE_LEVELS.find(e => e.value === experienceLevel);
             const typeInfo = INTERVIEW_TYPES.find(t => t.value === interviewType);
-            const focusLabels = focusAreas.map(f => FOCUS_AREAS.find(x => x.value === f)?.label).join(', ');
+            const focusLabels = focusAreas
+                .map(f => FOCUS_AREAS.find(x => x.value === f)?.label)
+                .filter(Boolean)
+                .join(', ');
 
             const prompt = `You are a world-class ATS resume analyzer, technical recruiter, and career coach. Analyze this resume with precision.
 
@@ -169,35 +181,15 @@ Return a JSON object with exactly these fields:
     }
   ]
 }`;
+            const result = await invokeResumeAnalysis(prompt);
 
-            const result = await invokeLLM({
-                prompt,
-                response_json_schema: {
-                    skills: ["string"],
-                    experience_years: "number",
-                    education: "string",
-                    projects: ["string"],
-                    strengths: ["string"],
-                    improvements: ["string"],
-                    ai_summary: "string",
-                    ats_score: "number",
-                    jd_match_score: "number",
-                    matched_keywords: ["string"],
-                    missing_keywords: ["string"],
-                    generated_questions: [
-                        {
-                            question: "string",
-                            category: "string",
-                            difficulty: "string",
-                            answer: "string"
-                        }
-                    ]
-                }
-            });
-
-            if (!result || !result.skills) {
+            if (!result || !Array.isArray(result.skills)) {
                 throw new Error('AI returned no usable data. Please try again.');
             }
+
+            // Clamp scores to 0–100
+            result.ats_score = Math.min(100, Math.max(0, result.ats_score || 0));
+            result.jd_match_score = Math.min(100, Math.max(0, result.jd_match_score || 0));
 
             const analysis = {
                 ...result,
@@ -219,11 +211,14 @@ Return a JSON object with exactly these fields:
                     target_role: targetRole,
                     status: 'complete',
                     ...result,
+                }).catch(err => {
+                    // Non-fatal — don't block the user if DB save fails
+                    console.warn('Failed to save analysis to DB:', err.message);
                 });
             }
 
             onComplete(analysis);
-            toast.success('Resume analyzed! Scroll through your results.');
+            toast.success('Resume analyzed successfully!');
         } catch (err) {
             toast.error('Analysis failed: ' + err.message);
         } finally {
@@ -234,27 +229,36 @@ Return a JSON object with exactly these fields:
     return (
         <div className="space-y-6">
             <div className="grid lg:grid-cols-2 gap-6">
+                {/* Left: File upload + target role */}
                 <div className="space-y-4">
                     <div>
                         <h2 className="text-sm font-black uppercase tracking-widest text-foreground mb-1">1. Upload Resume</h2>
-                        <p className="text-xs text-muted-foreground">PDF, DOC, DOCX, or TXT — max 10MB</p>
+                        <p className="text-xs text-muted-foreground">PDF, DOCX, or TXT — max {MAX_FILE_SIZE_MB}MB</p>
                     </div>
+
                     <div
                         onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
                         onDragLeave={() => setDragOver(false)}
                         onDrop={(e) => { e.preventDefault(); setDragOver(false); handleFile(e.dataTransfer.files[0]); }}
                         onClick={() => !file && fileRef.current?.click()}
-                        className={`relative border-2 border-dashed transition-all cursor-pointer flex flex-col items-center justify-center p-8 text-center min-h-[160px] ${dragOver ? 'border-primary bg-primary/5' : file ? 'border-emerald-500/50 bg-emerald-500/5 cursor-default' : 'border-border hover:border-primary/40 hover:bg-muted/30'
+                        className={`relative border-2 border-dashed transition-all flex flex-col items-center justify-center p-8 text-center min-h-[160px] ${dragOver
+                            ? 'border-primary bg-primary/5 cursor-copy'
+                            : file
+                                ? 'border-emerald-500/50 bg-emerald-500/5 cursor-default'
+                                : 'border-border hover:border-primary/40 hover:bg-muted/30 cursor-pointer'
                             }`}
                     >
                         {file ? (
                             <div className="flex flex-col items-center gap-3">
                                 <CheckCircle2 className="w-10 h-10 text-emerald-500" />
                                 <div>
-                                    <p className="font-bold text-sm text-foreground">{file.name}</p>
+                                    <p className="font-bold text-sm text-foreground truncate max-w-[200px]">{file.name}</p>
                                     <p className="text-xs text-muted-foreground mt-0.5">{(file.size / 1024).toFixed(1)} KB</p>
                                 </div>
-                                <button onClick={(e) => { e.stopPropagation(); setFile(null); }} className="text-xs text-red-500 hover:underline flex items-center gap-1">
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); setFile(null); fileRef.current.value = ''; }}
+                                    className="text-xs text-red-500 hover:underline flex items-center gap-1"
+                                >
                                     <X className="w-3 h-3" /> Remove
                                 </button>
                             </div>
@@ -266,24 +270,40 @@ Return a JSON object with exactly these fields:
                             </>
                         )}
                     </div>
-                    <input ref={fileRef} type="file" accept=".pdf,.doc,.docx,.txt" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
+                    <input
+                        ref={fileRef}
+                        type="file"
+                        accept=".pdf,.doc,.docx,.txt"
+                        className="hidden"
+                        onChange={(e) => handleFile(e.target.files?.[0])}
+                    />
 
                     <div>
-                        <label className="text-xs font-black uppercase tracking-widest text-muted-foreground block mb-1.5">Target Job Role</label>
-                        <input type="text" value={targetRole} onChange={(e) => setTargetRole(e.target.value)}
+                        <label className="text-xs font-black uppercase tracking-widest text-muted-foreground block mb-1.5">
+                            Target Job Role
+                        </label>
+                        <input
+                            type="text"
+                            value={targetRole}
+                            onChange={(e) => setTargetRole(e.target.value)}
                             placeholder="e.g. Senior Full Stack Engineer, DevOps Lead"
-                            className="w-full px-3 py-2 text-sm border border-border bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+                            className="w-full px-3 py-2 text-sm border border-border bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+                        />
                     </div>
                 </div>
 
+                {/* Right: JD paste */}
                 <div className="space-y-4">
                     <div>
-                        <h2 className="text-sm font-black uppercase tracking-widest text-foreground mb-1">2. Job Description (Optional)</h2>
+                        <h2 className="text-sm font-black uppercase tracking-widest text-foreground mb-1">2. Job Description <span className="text-muted-foreground font-normal normal-case tracking-normal">(Optional)</span></h2>
                         <p className="text-xs text-muted-foreground">Enables ATS match score and keyword gap analysis</p>
                     </div>
-                    <Textarea value={jdText} onChange={(e) => setJdText(e.target.value)}
+                    <Textarea
+                        value={jdText}
+                        onChange={(e) => setJdText(e.target.value)}
                         placeholder="Paste the full job description here for precise ATS matching, keyword gap analysis, and tailored interview questions..."
-                        className="min-h-[200px] text-sm resize-none" />
+                        className="min-h-[200px] text-sm resize-none"
+                    />
                     {jdText && (
                         <div className="flex items-center gap-2 text-xs text-emerald-600">
                             <CheckCircle2 className="w-3.5 h-3.5" /> JD detected — keyword matching enabled
@@ -292,15 +312,21 @@ Return a JSON object with exactly these fields:
                 </div>
             </div>
 
+            {/* Customize Analysis */}
             <div className="border border-border p-5 space-y-5 bg-muted/20">
                 <h2 className="text-sm font-black uppercase tracking-widest text-foreground">3. Customize Analysis</h2>
                 <div className="grid sm:grid-cols-3 gap-4">
                     <div>
                         <label className="text-xs font-black uppercase tracking-widest text-muted-foreground block mb-2">Experience Level</label>
                         <div className="relative">
-                            <select value={experienceLevel} onChange={(e) => setExperienceLevel(e.target.value)}
-                                className="w-full px-3 py-2 text-sm border border-border bg-background focus:outline-none focus:ring-1 focus:ring-primary appearance-none pr-8">
-                                {EXPERIENCE_LEVELS.map(e => <option key={e.value} value={e.value}>{e.emoji} {e.label}</option>)}
+                            <select
+                                value={experienceLevel}
+                                onChange={(e) => setExperienceLevel(e.target.value)}
+                                className="w-full px-3 py-2 text-sm border border-border bg-background focus:outline-none focus:ring-1 focus:ring-primary appearance-none pr-8"
+                            >
+                                {EXPERIENCE_LEVELS.map(e => (
+                                    <option key={e.value} value={e.value}>{e.emoji} {e.label}</option>
+                                ))}
                             </select>
                             <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
                         </div>
@@ -309,9 +335,14 @@ Return a JSON object with exactly these fields:
                     <div>
                         <label className="text-xs font-black uppercase tracking-widest text-muted-foreground block mb-2">Interview Type</label>
                         <div className="relative">
-                            <select value={interviewType} onChange={(e) => setInterviewType(e.target.value)}
-                                className="w-full px-3 py-2 text-sm border border-border bg-background focus:outline-none focus:ring-1 focus:ring-primary appearance-none pr-8">
-                                {INTERVIEW_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                            <select
+                                value={interviewType}
+                                onChange={(e) => setInterviewType(e.target.value)}
+                                className="w-full px-3 py-2 text-sm border border-border bg-background focus:outline-none focus:ring-1 focus:ring-primary appearance-none pr-8"
+                            >
+                                {INTERVIEW_TYPES.map(t => (
+                                    <option key={t.value} value={t.value}>{t.label}</option>
+                                ))}
                             </select>
                             <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
                         </div>
@@ -321,9 +352,16 @@ Return a JSON object with exactly these fields:
                         <label className="text-xs font-black uppercase tracking-widest text-muted-foreground block mb-2">Questions to Generate</label>
                         <div className="flex gap-1.5 flex-wrap">
                             {[10, 15, 20, 25].map(n => (
-                                <button key={n} onClick={() => setQuestionCount(n)}
-                                    className={`px-3 py-2 text-sm font-bold border transition-colors ${questionCount === n ? 'bg-primary text-primary-foreground border-primary' : 'border-border hover:border-primary/40'
-                                        }`}>{n}</button>
+                                <button
+                                    key={n}
+                                    onClick={() => setQuestionCount(n)}
+                                    className={`px-3 py-2 text-sm font-bold border transition-colors ${questionCount === n
+                                        ? 'bg-primary text-primary-foreground border-primary'
+                                        : 'border-border hover:border-primary/40'
+                                        }`}
+                                >
+                                    {n}
+                                </button>
                             ))}
                         </div>
                     </div>
@@ -333,11 +371,14 @@ Return a JSON object with exactly these fields:
                     <label className="text-xs font-black uppercase tracking-widest text-muted-foreground block mb-2">Focus Areas (select multiple)</label>
                     <div className="flex flex-wrap gap-2">
                         {FOCUS_AREAS.map(f => (
-                            <button key={f.value} onClick={() => toggleFocus(f.value)}
+                            <button
+                                key={f.value}
+                                onClick={() => toggleFocus(f.value)}
                                 className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold border transition-colors ${focusAreas.includes(f.value)
                                     ? 'bg-primary text-primary-foreground border-primary'
                                     : 'border-border text-muted-foreground hover:border-primary/40 hover:text-foreground'
-                                    }`}>
+                                    }`}
+                            >
                                 <span>{f.icon}</span> {f.label}
                             </button>
                         ))}
@@ -345,15 +386,23 @@ Return a JSON object with exactly these fields:
                 </div>
             </div>
 
-            <Button onClick={handleAnalyze} disabled={!file || analyzing} className="w-full h-12 text-sm font-black uppercase tracking-widest gap-3" size="lg">
+            <Button
+                onClick={handleAnalyze}
+                disabled={!file || analyzing}
+                className="w-full h-12 text-sm font-black uppercase tracking-widest gap-3"
+                size="lg"
+            >
                 {analyzing
                     ? <><Loader2 className="w-4 h-4 animate-spin" /> Analyzing with AI...</>
                     : <><Sparkles className="w-4 h-4" /> Analyze Resume ({questionCount} Questions, {focusAreas.length} Focus Areas)</>
                 }
             </Button>
+
             {analyzing && (
                 <div className="space-y-1.5 text-center">
-                    <p className="text-xs text-muted-foreground animate-pulse">Extracting skills · Scoring ATS compatibility · Generating personalized questions...</p>
+                    <p className="text-xs text-muted-foreground animate-pulse">
+                        Extracting skills · Scoring ATS compatibility · Generating personalized questions...
+                    </p>
                     <p className="text-[10px] text-muted-foreground">This takes ~15–20 seconds</p>
                 </div>
             )}
