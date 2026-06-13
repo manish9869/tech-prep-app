@@ -1,0 +1,465 @@
+import React, { useState, useEffect } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Company, Question } from '@/api/entities';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Badge } from '@/components/ui/badge';
+import { Plus, X, Sparkles as SparklesIcon, Loader2, CheckCircle2, Circle, Building2 } from 'lucide-react';
+import { Dialog as CompanyDialog, DialogContent as CompanyDialogContent, DialogHeader as CompanyDialogHeader, DialogTitle as CompanyDialogTitle, DialogFooter as CompanyDialogFooter } from '@/components/ui/dialog';
+import { toast } from 'sonner';
+import { ScrollArea } from '@/components/ui/scroll-area';
+
+const LANGUAGES = ['java', 'javascript', 'typescript', 'python', 'cpp', 'go', 'rust', 'sql', 'yaml', 'json'];
+
+const defaultForm = {
+    topic_id: '', topic_name: '', title: '', description: '', difficulty: 'basic',
+    type: 'theory', experience_level: 'fresher', code_snippet: '', code_language: 'java',
+    answer: '', explanation: '', options: [], correct_option_index: 0,
+    tags: [], company_tags: [], references: '', status: 'published', is_visible: true,
+};
+
+async function invokeLLM(prompt) {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            model: 'claude-sonnet-4-6',
+            max_tokens: 1000,
+            messages: [{ role: 'user', content: prompt }],
+        }),
+    });
+    const data = await response.json();
+    return data.content?.[0]?.text ?? '';
+}
+
+export default function QuestionFormDialog({ open, onOpenChange, editQuestion, topics }) {
+    const [form, setForm] = useState(defaultForm);
+    const [tagInput, setTagInput] = useState('');
+    const [aiLoading, setAiLoading] = useState(false);
+    const [addCompanyOpen, setAddCompanyOpen] = useState(false);
+    const [newCompanyName, setNewCompanyName] = useState('');
+    const qc = useQueryClient();
+
+    const { data: companies = [] } = useQuery({
+        queryKey: ['companies'],
+        queryFn: () => Company.list(),
+    });
+
+    const addCompanyMut = useMutation({
+        mutationFn: name => Company.create({ name, is_active: true }),
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ['companies'] });
+            setNewCompanyName('');
+            setAddCompanyOpen(false);
+        },
+    });
+
+    useEffect(() => {
+        if (editQuestion) setForm({ ...defaultForm, ...editQuestion });
+        else setForm(defaultForm);
+    }, [editQuestion, open]);
+
+    const createMut = useMutation({
+        mutationFn: d => Question.create(d),
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ['questions'] });
+            onOpenChange(false);
+            toast.success('Question created!');
+        },
+    });
+
+    const updateMut = useMutation({
+        mutationFn: ({ id, d }) => Question.update(id, d),
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ['questions'] });
+            onOpenChange(false);
+            toast.success('Question updated!');
+        },
+    });
+
+    const handleSave = () => {
+        if (!form.title.trim()) return toast.error('Title is required');
+        if (!form.topic_id) return toast.error('Please select a topic');
+        const topic = topics.find(t => t.id === form.topic_id);
+        const data = { ...form, topic_name: topic?.name || '' };
+        if (editQuestion) updateMut.mutate({ id: editQuestion.id, d: data });
+        else createMut.mutate(data);
+    };
+
+    const handleAiGenerate = async (field) => {
+        if (!form.title) return toast.error('Add a title first');
+        setAiLoading(true);
+        try {
+            const prompts = {
+                answer: `Generate a comprehensive interview answer for: "${form.title}". ${form.description ? 'Context: ' + form.description : ''}. Keep it clear, structured, and interview-ready. Topic: ${form.topic_name || 'General Tech'}.`,
+                explanation: `Generate a detailed explanation for interview question: "${form.title}". Include examples, best practices, and common pitfalls. Topic: ${form.topic_name || 'General Tech'}.`,
+            };
+            const result = await invokeLLM(prompts[field]);
+            setForm(f => ({ ...f, [field]: result }));
+            toast.success(`${field} generated by AI ✨`);
+        } catch (err) {
+            toast.error('AI generation failed: ' + err.message);
+        } finally {
+            setAiLoading(false);
+        }
+    };
+
+    const addTag = () => {
+        if (tagInput.trim() && !form.tags.includes(tagInput.trim())) {
+            setForm(f => ({ ...f, tags: [...f.tags, tagInput.trim()] }));
+            setTagInput('');
+        }
+    };
+
+    const addOption = () => setForm(f => ({ ...f, options: [...(f.options || []), { text: '', is_correct: false }] }));
+
+    const updateOption = (i, text) => {
+        const opts = [...(form.options || [])];
+        opts[i] = { ...opts[i], text };
+        setForm(f => ({ ...f, options: opts }));
+    };
+
+    const setCorrectOption = (i) => {
+        const opts = (form.options || []).map((o, idx) => ({ ...o, is_correct: idx === i }));
+        setForm(f => ({ ...f, options: opts, correct_option_index: i }));
+    };
+
+    const removeOption = (i) => setForm(f => ({ ...f, options: f.options.filter((_, idx) => idx !== i) }));
+    const set = (key, val) => setForm(f => ({ ...f, [key]: val }));
+
+    const isMCQ = form.type === 'mcq';
+
+    return (
+        <>
+            <Dialog open={open} onOpenChange={onOpenChange}>
+                <DialogContent className="max-w-3xl max-h-[92vh] p-0 rounded-2xl overflow-hidden">
+                    <DialogHeader className="px-6 pt-5 pb-0">
+                        <DialogTitle className="font-heading">{editQuestion ? '✏️ Edit Question' : '✨ Add Question'}</DialogTitle>
+                    </DialogHeader>
+
+                    <ScrollArea className="max-h-[calc(92vh-130px)] px-6">
+                        <Tabs defaultValue="basic" className="mt-4">
+                            <TabsList className="mb-5 rounded-xl bg-muted/60 h-10">
+                                <TabsTrigger value="basic" className="rounded-lg text-xs font-semibold">📋 Basic Info</TabsTrigger>
+                                <TabsTrigger value="content" className="rounded-lg text-xs font-semibold">📝 Answer</TabsTrigger>
+                                <TabsTrigger value="code" className="rounded-lg text-xs font-semibold">
+                                    💻 Code Snippet {form.code_snippet && <span className="ml-1 w-1.5 h-1.5 bg-emerald-500 rounded-full inline-block" />}
+                                </TabsTrigger>
+                                <TabsTrigger value="mcq" className="rounded-lg text-xs font-semibold">
+                                    🔢 MCQ Options {isMCQ && (form.options?.length > 0) && <span className="ml-1 w-1.5 h-1.5 bg-primary rounded-full inline-block" />}
+                                </TabsTrigger>
+                                <TabsTrigger value="meta" className="rounded-lg text-xs font-semibold">🏷️ Tags</TabsTrigger>
+                            </TabsList>
+
+                            <TabsContent value="basic" className="space-y-4 pb-2">
+                                <div>
+                                    <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Topic *</Label>
+                                    <Select value={form.topic_id} onValueChange={v => set('topic_id', v)}>
+                                        <SelectTrigger className="mt-1.5 rounded-xl"><SelectValue placeholder="Select topic..." /></SelectTrigger>
+                                        <SelectContent>
+                                            {topics.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+
+                                <div>
+                                    <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Question Title *</Label>
+                                    <Input value={form.title} onChange={e => set('title', e.target.value)} className="mt-1.5 rounded-xl" placeholder="e.g. What is the difference between let, var and const?" />
+                                </div>
+
+                                <div>
+                                    <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Description / Context</Label>
+                                    <Textarea value={form.description} onChange={e => set('description', e.target.value)} className="mt-1.5 rounded-xl" rows={3} placeholder="Add context, scenarios, or extra details..." />
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Difficulty</Label>
+                                        <Select value={form.difficulty} onValueChange={v => set('difficulty', v)}>
+                                            <SelectTrigger className="mt-1.5 rounded-xl"><SelectValue /></SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="basic">🟢 Basic</SelectItem>
+                                                <SelectItem value="medium">🟡 Medium</SelectItem>
+                                                <SelectItem value="experienced">🔴 Experienced</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div>
+                                        <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Question Type</Label>
+                                        <Select value={form.type} onValueChange={v => set('type', v)}>
+                                            <SelectTrigger className="mt-1.5 rounded-xl"><SelectValue /></SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="theory">📖 Theory</SelectItem>
+                                                <SelectItem value="coding">💻 Coding</SelectItem>
+                                                <SelectItem value="scenario">🎭 Scenario Based</SelectItem>
+                                                <SelectItem value="interview">🎤 Interview</SelectItem>
+                                                <SelectItem value="mcq">🔢 MCQ (Multiple Choice)</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                </div>
+
+                                {isMCQ && (
+                                    <div className="rounded-xl bg-primary/5 border border-primary/20 p-3 text-sm text-primary font-medium">
+                                        💡 You selected <strong>MCQ</strong> — go to the <strong>"MCQ Options"</strong> tab to add answer choices.
+                                    </div>
+                                )}
+
+                                {form.type === 'coding' && (
+                                    <div className="rounded-xl bg-emerald-500/5 border border-emerald-500/20 p-3 text-sm text-emerald-700 dark:text-emerald-400 font-medium">
+                                        💡 You selected <strong>Coding</strong> — go to the <strong>"Code Snippet"</strong> tab to add code.
+                                    </div>
+                                )}
+
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Experience Level</Label>
+                                        <Select value={form.experience_level} onValueChange={v => set('experience_level', v)}>
+                                            <SelectTrigger className="mt-1.5 rounded-xl"><SelectValue /></SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="fresher">Fresher (0–1 yr)</SelectItem>
+                                                <SelectItem value="junior">Junior (1–3 yrs)</SelectItem>
+                                                <SelectItem value="mid_level">Mid-Level (3–6 yrs)</SelectItem>
+                                                <SelectItem value="senior">Senior (6+ yrs)</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div>
+                                        <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Status</Label>
+                                        <Select value={form.status} onValueChange={v => set('status', v)}>
+                                            <SelectTrigger className="mt-1.5 rounded-xl"><SelectValue /></SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="draft">📄 Draft</SelectItem>
+                                                <SelectItem value="review">🔍 Under Review</SelectItem>
+                                                <SelectItem value="published">✅ Published</SelectItem>
+                                                <SelectItem value="archived">📦 Archived</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                </div>
+
+                                <div className="flex items-center gap-3 p-3 rounded-xl bg-muted/50">
+                                    <Switch checked={form.is_visible} onCheckedChange={v => set('is_visible', v)} />
+                                    <div>
+                                        <Label className="text-sm font-medium cursor-pointer">Visible to viewers</Label>
+                                        <p className="text-xs text-muted-foreground">When off, only admins can see this question</p>
+                                    </div>
+                                </div>
+                            </TabsContent>
+
+                            <TabsContent value="content" className="space-y-4 pb-2">
+                                <div>
+                                    <div className="flex items-center justify-between mb-1.5">
+                                        <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Answer</Label>
+                                        <Button variant="ghost" size="sm" onClick={() => handleAiGenerate('answer')} disabled={aiLoading || !form.title} className="h-7 text-xs gap-1 text-primary hover:bg-primary/10 rounded-lg">
+                                            {aiLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <SparklesIcon className="w-3 h-3" />}
+                                            AI Generate
+                                        </Button>
+                                    </div>
+                                    <Textarea value={form.answer} onChange={e => set('answer', e.target.value)} className="rounded-xl text-sm" rows={6} placeholder="Write the answer here. Supports Markdown formatting." />
+                                </div>
+
+                                <div>
+                                    <div className="flex items-center justify-between mb-1.5">
+                                        <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Detailed Explanation</Label>
+                                        <Button variant="ghost" size="sm" onClick={() => handleAiGenerate('explanation')} disabled={aiLoading || !form.title} className="h-7 text-xs gap-1 text-primary hover:bg-primary/10 rounded-lg">
+                                            {aiLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <SparklesIcon className="w-3 h-3" />}
+                                            AI Generate
+                                        </Button>
+                                    </div>
+                                    <Textarea value={form.explanation} onChange={e => set('explanation', e.target.value)} className="rounded-xl text-sm" rows={4} placeholder="Deeper explanation with examples, diagrams, comparisons..." />
+                                </div>
+
+                                <div>
+                                    <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">References / Links</Label>
+                                    <Textarea value={form.references} onChange={e => set('references', e.target.value)} className="rounded-xl text-sm" rows={2} placeholder="MDN, official docs, YouTube links, etc." />
+                                </div>
+                            </TabsContent>
+
+                            <TabsContent value="code" className="space-y-4 pb-2">
+                                <div className="rounded-xl bg-muted/50 border p-4 text-sm text-muted-foreground space-y-1">
+                                    <p className="font-semibold text-foreground text-sm">📌 Code Snippet Tab</p>
+                                    <p>Use this to add an optional code block that will be displayed with the question. This works for <strong>any question type</strong> — not just "Coding" type.</p>
+                                </div>
+                                <div>
+                                    <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Programming Language</Label>
+                                    <Select value={form.code_language} onValueChange={v => set('code_language', v)}>
+                                        <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
+                                        <SelectContent>
+                                            {LANGUAGES.map(l => <SelectItem key={l} value={l}>{l.toUpperCase()}</SelectItem>)}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div>
+                                    <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Code Snippet</Label>
+                                    <Textarea
+                                        value={form.code_snippet}
+                                        onChange={e => set('code_snippet', e.target.value)}
+                                        className="rounded-xl font-mono text-sm bg-zinc-950 text-zinc-100 border-zinc-800"
+                                        rows={12}
+                                        placeholder="// Paste your code here..."
+                                        spellCheck={false}
+                                    />
+                                </div>
+                                {form.code_snippet && (
+                                    <div className="rounded-xl bg-emerald-500/5 border border-emerald-500/20 p-3 text-xs text-emerald-700 dark:text-emerald-400 font-medium">
+                                        ✅ Code snippet added ({form.code_snippet.split('\n').length} lines)
+                                    </div>
+                                )}
+                            </TabsContent>
+
+                            <TabsContent value="mcq" className="space-y-4 pb-2">
+                                <div className="rounded-xl bg-muted/50 border p-4 text-sm text-muted-foreground space-y-2">
+                                    <p className="font-semibold text-foreground text-sm">🔢 MCQ Options</p>
+                                    <p>Add multiple choice options below. Click the radio button to mark the <strong>correct answer</strong>.</p>
+                                    {!isMCQ && (
+                                        <div className="mt-1 p-2 bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-xs font-semibold leading-snug">
+                                            ⚠️ Type is currently <strong>"{form.type}"</strong> — switch it to <strong>"MCQ"</strong> in the Basic Info tab.
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="flex items-center justify-between">
+                                    <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                                        Answer Options ({(form.options || []).length})
+                                    </Label>
+                                    <Button variant="outline" size="sm" onClick={addOption} className="rounded-xl h-8 text-xs">
+                                        <Plus className="w-3 h-3 mr-1" />Add Option
+                                    </Button>
+                                </div>
+                                {(form.options || []).length === 0 ? (
+                                    <div className="text-center py-8 text-sm text-muted-foreground border border-dashed rounded-xl">
+                                        No options yet. Click "Add Option" to start.
+                                    </div>
+                                ) : (
+                                    <div className="space-y-2">
+                                        {(form.options || []).map((opt, i) => (
+                                            <div key={i} className={`flex items-center gap-3 p-3 rounded-xl border-2 transition-all ${form.correct_option_index === i ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-border bg-card'
+                                                }`}>
+                                                <button onClick={() => setCorrectOption(i)} className="flex-shrink-0 transition-colors" title="Mark as correct answer">
+                                                    {form.correct_option_index === i
+                                                        ? <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+                                                        : <Circle className="w-5 h-5 text-muted-foreground hover:text-emerald-500" />}
+                                                </button>
+                                                <span className="text-xs font-bold text-muted-foreground w-5 flex-shrink-0">{String.fromCharCode(65 + i)}.</span>
+                                                <Input value={opt.text} onChange={e => updateOption(i, e.target.value)} placeholder={`Type option ${String.fromCharCode(65 + i)} here...`} className="flex-1 rounded-lg h-8 text-sm" />
+                                                {form.correct_option_index === i && (
+                                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-600 flex-shrink-0 whitespace-nowrap">✓ CORRECT</span>
+                                                )}
+                                                <Button variant="ghost" size="icon" className="h-7 w-7 flex-shrink-0 hover:text-destructive" onClick={() => removeOption(i)}>
+                                                    <X className="w-3.5 h-3.5" />
+                                                </Button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                                {(form.options || []).length > 0 && (
+                                    <div className="rounded-xl bg-muted/50 p-3 text-xs text-muted-foreground">
+                                        <strong className="text-foreground">Correct answer:</strong> Option {String.fromCharCode(65 + (form.correct_option_index || 0))} — "{(form.options[form.correct_option_index] || {}).text || '(empty)'}"
+                                    </div>
+                                )}
+                            </TabsContent>
+
+                            <TabsContent value="meta" className="space-y-4 pb-2">
+                                <div>
+                                    <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Tags</Label>
+                                    <div className="flex gap-2">
+                                        <Input value={tagInput} onChange={e => setTagInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addTag())} placeholder="Type tag + Enter..." className="flex-1 rounded-xl" />
+                                        <Button variant="outline" onClick={addTag} className="rounded-xl">Add</Button>
+                                    </div>
+                                    <div className="flex flex-wrap gap-1.5 mt-2 min-h-[28px]">
+                                        {(form.tags || []).map(t => (
+                                            <Badge key={t} variant="secondary" className="gap-1 rounded-lg">
+                                                {t}
+                                                <button onClick={() => setForm(f => ({ ...f, tags: f.tags.filter(x => x !== t) }))} className="hover:text-destructive">
+                                                    <X className="w-2.5 h-2.5" />
+                                                </button>
+                                            </Badge>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <div className="flex items-center justify-between mb-2">
+                                        <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Company Tags</Label>
+                                        <Button variant="ghost" size="sm" className="h-7 text-xs gap-1 text-primary hover:bg-primary/10 rounded-lg" onClick={() => setAddCompanyOpen(true)}>
+                                            <Plus className="w-3 h-3" /> Add Company
+                                        </Button>
+                                    </div>
+                                    {companies.filter(c => c.is_active !== false).length === 0 ? (
+                                        <p className="text-xs text-muted-foreground py-2">No companies yet. Click "Add Company" to create some.</p>
+                                    ) : (
+                                        <div className="flex flex-wrap gap-2">
+                                            {companies.filter(c => c.is_active !== false).map(c => (
+                                                <Badge
+                                                    key={c.id}
+                                                    variant={form.company_tags?.includes(c.name) ? 'default' : 'outline'}
+                                                    className="cursor-pointer rounded-lg transition-all select-none"
+                                                    onClick={() => setForm(f => ({
+                                                        ...f,
+                                                        company_tags: f.company_tags?.includes(c.name)
+                                                            ? f.company_tags.filter(x => x !== c.name)
+                                                            : [...(f.company_tags || []), c.name]
+                                                    }))}
+                                                >
+                                                    🏢 {c.name}
+                                                </Badge>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </TabsContent>
+                        </Tabs>
+                        <div className="h-4" />
+                    </ScrollArea>
+
+                    <DialogFooter className="px-6 py-4 border-t bg-muted/30 flex items-center justify-between">
+                        <div className="text-xs text-muted-foreground">
+                            {form.type && <span className="font-medium">{form.type.toUpperCase()}</span>}
+                            {form.code_snippet && ' · has code'}
+                            {isMCQ && form.options?.length > 0 && ` · ${form.options.length} options`}
+                        </div>
+                        <div className="flex gap-2">
+                            <Button variant="outline" onClick={() => onOpenChange(false)} className="rounded-xl">Cancel</Button>
+                            <Button onClick={handleSave} disabled={createMut.isPending || updateMut.isPending} className="rounded-xl">
+                                {createMut.isPending || updateMut.isPending ? <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />Saving...</> : '💾 Save Question'}
+                            </Button>
+                        </div>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <CompanyDialog open={addCompanyOpen} onOpenChange={setAddCompanyOpen}>
+                <CompanyDialogContent className="max-w-sm">
+                    <CompanyDialogHeader>
+                        <CompanyDialogTitle className="flex items-center gap-2">
+                            <Building2 className="w-4 h-4 text-primary" /> Add Company
+                        </CompanyDialogTitle>
+                    </CompanyDialogHeader>
+                    <div className="py-2">
+                        <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Company Name</Label>
+                        <Input
+                            value={newCompanyName}
+                            onChange={e => setNewCompanyName(e.target.value)}
+                            onKeyDown={e => e.key === 'Enter' && newCompanyName.trim() && addCompanyMut.mutate(newCompanyName.trim())}
+                            placeholder="e.g. Amazon, Google..."
+                            className="mt-1.5 rounded-xl"
+                            autoFocus
+                        />
+                    </div>
+                    <CompanyDialogFooter>
+                        <Button variant="outline" onClick={() => setAddCompanyOpen(false)} className="rounded-xl">Cancel</Button>
+                        <Button onClick={() => newCompanyName.trim() && addCompanyMut.mutate(newCompanyName.trim())} disabled={!newCompanyName.trim() || addCompanyMut.isPending} className="rounded-xl">
+                            {addCompanyMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : '+ Add'}
+                        </Button>
+                    </CompanyDialogFooter>
+                </CompanyDialogContent>
+            </CompanyDialog>
+        </>
+    );
+}
