@@ -8,7 +8,7 @@ import EmptyState from '@/components/shared/EmptyState';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
-import { Search, FileQuestion, X } from 'lucide-react';
+import { Search, FileQuestion, X, Building2 } from 'lucide-react';
 
 const COMPANIES = ['Amazon', 'Google', 'Microsoft', 'Meta', 'Netflix', 'Oracle', 'Deloitte', 'TCS', 'Infosys', 'Wipro'];
 
@@ -78,7 +78,7 @@ export default function AllQuestionsPage() {
                         {search && <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2"><X className="w-4 h-4 text-muted-foreground" /></button>}
                     </div>
                     {activeFilters > 0 && (
-                        <Button variant="outline" size="sm" onClick={clearFilters} className="rounded-xl gap-1.5">
+                        <Button variant="outline" size="sm" onClick={clearFilters} className="rounded-none gap-1.5">
                             <X className="w-3 h-3" />Clear {activeFilters}
                         </Button>
                     )}
@@ -88,52 +88,75 @@ export default function AllQuestionsPage() {
                         <SelectTrigger className="w-[140px] rounded-xl h-8 text-xs"><SelectValue placeholder="Topic" /></SelectTrigger>
                         <SelectContent>
                             <SelectItem value="all">All Topics</SelectItem>
-                            {topics.filter(t => t.is_visible !== false).map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+                            {topics.filter(t => t.is_visible !== false).map(t => (
+                                <SelectItem key={t.id} value={t.id}>
+                                    <div className="flex items-center gap-2">
+                                        {t.logo_url ? (
+                                            <img src={t.logo_url} alt={t.name} className="w-4 h-4 object-contain" />
+                                        ) : (
+                                            <div
+                                                className="w-4 h-4 flex items-center justify-center text-white text-[8px] font-black flex-shrink-0"
+                                                style={{ background: t.color || '#6366f1' }}
+                                            >
+                                                {t.name?.[0]?.toUpperCase()}
+                                            </div>
+                                        )}
+                                        <span>{t.name}</span>
+                                    </div>
+                                </SelectItem>
+                            ))}
                         </SelectContent>
                     </Select>
                     <Select value={diffFilter} onValueChange={setDiffFilter}>
                         <SelectTrigger className="w-[130px] rounded-xl h-8 text-xs"><SelectValue placeholder="Difficulty" /></SelectTrigger>
                         <SelectContent>
                             <SelectItem value="all">All Levels</SelectItem>
-                            <SelectItem value="basic">Basic</SelectItem>
-                            <SelectItem value="medium">Medium</SelectItem>
-                            <SelectItem value="experienced">Experienced</SelectItem>
+                            <SelectItem value="basic">🟢 Basic</SelectItem>
+                            <SelectItem value="medium">🟡 Medium</SelectItem>
+                            <SelectItem value="experienced">🔴 Experienced</SelectItem>
                         </SelectContent>
                     </Select>
                     <Select value={typeFilter} onValueChange={setTypeFilter}>
                         <SelectTrigger className="w-[140px] rounded-xl h-8 text-xs"><SelectValue placeholder="Type" /></SelectTrigger>
                         <SelectContent>
                             <SelectItem value="all">All Types</SelectItem>
-                            <SelectItem value="theory">Theory</SelectItem>
-                            <SelectItem value="coding">Coding</SelectItem>
-                            <SelectItem value="scenario">Scenario</SelectItem>
-                            <SelectItem value="interview">Interview</SelectItem>
-                            <SelectItem value="mcq">MCQ</SelectItem>
+                            <SelectItem value="theory">📖 Theory</SelectItem>
+                            <SelectItem value="coding">💻 Coding</SelectItem>
+                            <SelectItem value="scenario">🎭 Scenario</SelectItem>
+                            <SelectItem value="interview">🎤 Interview</SelectItem>
+                            <SelectItem value="mcq">🔢 MCQ</SelectItem>
                         </SelectContent>
                     </Select>
                     <Select value={expFilter} onValueChange={setExpFilter}>
                         <SelectTrigger className="w-[150px] rounded-xl h-8 text-xs"><SelectValue placeholder="Experience" /></SelectTrigger>
                         <SelectContent>
                             <SelectItem value="all">All Experience</SelectItem>
-                            <SelectItem value="fresher">Fresher 0-1yr</SelectItem>
-                            <SelectItem value="junior">Junior 1-3yr</SelectItem>
-                            <SelectItem value="mid_level">Mid 3-6yr</SelectItem>
-                            <SelectItem value="senior">Senior 6+yr</SelectItem>
+                            <SelectItem value="fresher">🌱 Fresher 0–1yr</SelectItem>
+                            <SelectItem value="junior">⚡ Junior 1–3yr</SelectItem>
+                            <SelectItem value="mid_level">🔥 Mid 3–6yr</SelectItem>
+                            <SelectItem value="senior">🏆 Senior 6+yr</SelectItem>
                         </SelectContent>
                     </Select>
                     <Select value={companyFilter} onValueChange={setCompanyFilter}>
                         <SelectTrigger className="w-[140px] rounded-xl h-8 text-xs"><SelectValue placeholder="Company" /></SelectTrigger>
                         <SelectContent>
                             <SelectItem value="all">All Companies</SelectItem>
-                            {COMPANIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                            {COMPANIES.map(c => (
+                                <SelectItem key={c} value={c}>
+                                    <div className="flex items-center gap-2">
+                                        <Building2 className="w-3.5 h-3.5 text-muted-foreground" />
+                                        <span>{c}</span>
+                                    </div>
+                                </SelectItem>
+                            ))}
                         </SelectContent>
                     </Select>
                     <Select value={sort} onValueChange={setSort}>
                         <SelectTrigger className="w-[130px] rounded-xl h-8 text-xs"><SelectValue /></SelectTrigger>
                         <SelectContent>
-                            <SelectItem value="newest">Newest</SelectItem>
-                            <SelectItem value="oldest">Oldest</SelectItem>
-                            <SelectItem value="difficulty_asc">By Difficulty</SelectItem>
+                            <SelectItem value="newest">🕐 Newest First</SelectItem>
+                            <SelectItem value="oldest">🕙 Oldest First</SelectItem>
+                            <SelectItem value="difficulty_asc">📶 By Difficulty</SelectItem>
                         </SelectContent>
                     </Select>
                 </div>

@@ -1,12 +1,14 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { CheckCircle2, XCircle, AlertTriangle, TrendingUp, RefreshCw, User, Briefcase, Code2, Star } from 'lucide-react';
 
 function ScoreRing({ score, label, color }) {
+    const safeScore = Math.min(100, Math.max(0, score || 0));
     const radius = 36;
     const circ = 2 * Math.PI * radius;
-    const offset = circ - (score / 100) * circ;
+    const offset = circ - (safeScore / 100) * circ;
+
     return (
         <div className="flex flex-col items-center gap-2">
             <div className="relative w-24 h-24">
@@ -15,13 +17,14 @@ function ScoreRing({ score, label, color }) {
                     <circle
                         cx="48" cy="48" r={radius} fill="none"
                         stroke={color} strokeWidth="8"
-                        strokeDasharray={circ} strokeDashoffset={offset}
+                        strokeDasharray={circ}
+                        strokeDashoffset={offset}
                         strokeLinecap="square"
                         style={{ transition: 'stroke-dashoffset 1s ease' }}
                     />
                 </svg>
                 <div className="absolute inset-0 flex items-center justify-center">
-                    <span className="text-2xl font-black text-foreground">{score}</span>
+                    <span className="text-2xl font-black text-foreground">{safeScore}</span>
                 </div>
             </div>
             <span className="text-xs font-black uppercase tracking-widest text-muted-foreground">{label}</span>
@@ -29,9 +32,15 @@ function ScoreRing({ score, label, color }) {
     );
 }
 
+function scoreColor(score) {
+    if (score >= 80) return '#10b981';
+    if (score >= 60) return '#f59e0b';
+    return '#ef4444';
+}
+
 export default function ResumeScoreCard({ analysis, onRefresh }) {
-    const atsColor = analysis.ats_score >= 80 ? '#10b981' : analysis.ats_score >= 60 ? '#f59e0b' : '#ef4444';
-    const jdColor = analysis.jd_match_score >= 80 ? '#10b981' : analysis.jd_match_score >= 60 ? '#f59e0b' : '#ef4444';
+    const atsScore = analysis.ats_score || 0;
+    const jdScore = analysis.jd_match_score || 0;
 
     return (
         <div className="space-y-6">
@@ -39,15 +48,19 @@ export default function ResumeScoreCard({ analysis, onRefresh }) {
             <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 {/* ATS Score */}
                 <div className="glass border border-border p-6 flex flex-col items-center gap-3">
-                    <ScoreRing score={analysis.ats_score} label="ATS Score" color={atsColor} />
+                    <ScoreRing score={atsScore} label="ATS Score" color={scoreColor(atsScore)} />
                     <p className="text-xs text-center text-muted-foreground">
-                        {analysis.ats_score >= 80 ? 'Excellent ATS compatibility' : analysis.ats_score >= 60 ? 'Good but improvable' : 'Needs significant improvements'}
+                        {atsScore >= 80
+                            ? 'Excellent ATS compatibility'
+                            : atsScore >= 60
+                                ? 'Good but improvable'
+                                : 'Needs significant improvements'}
                     </p>
                 </div>
 
                 {/* JD Match */}
                 <div className="glass border border-border p-6 flex flex-col items-center gap-3">
-                    <ScoreRing score={analysis.jd_match_score || 0} label="JD Match" color={jdColor} />
+                    <ScoreRing score={jdScore} label="JD Match" color={scoreColor(jdScore)} />
                     <p className="text-xs text-center text-muted-foreground">
                         {analysis.jd_text ? 'Based on provided JD' : 'No JD provided'}
                     </p>
@@ -56,17 +69,19 @@ export default function ResumeScoreCard({ analysis, onRefresh }) {
                 {/* Experience */}
                 <div className="glass border border-border p-6 flex flex-col items-center justify-center gap-2 text-center">
                     <Briefcase className="w-8 h-8 text-primary" />
-                    <div className="text-3xl font-black text-foreground">{analysis.experience_years || 0}</div>
+                    <div className="text-3xl font-black text-foreground">{analysis.experience_years ?? 0}</div>
                     <span className="text-xs font-black uppercase tracking-widest text-muted-foreground">Years Exp.</span>
-                    {analysis.education && <p className="text-[10px] text-muted-foreground mt-1">{analysis.education}</p>}
+                    {analysis.education && (
+                        <p className="text-[10px] text-muted-foreground mt-1 line-clamp-2">{analysis.education}</p>
+                    )}
                 </div>
 
                 {/* Skills Count */}
                 <div className="glass border border-border p-6 flex flex-col items-center justify-center gap-2 text-center">
                     <Code2 className="w-8 h-8 text-violet-500" />
-                    <div className="text-3xl font-black text-foreground">{analysis.skills?.length || 0}</div>
+                    <div className="text-3xl font-black text-foreground">{analysis.skills?.length ?? 0}</div>
                     <span className="text-xs font-black uppercase tracking-widest text-muted-foreground">Skills Found</span>
-                    <p className="text-[10px] text-muted-foreground mt-1">{analysis.projects?.length || 0} projects detected</p>
+                    <p className="text-[10px] text-muted-foreground mt-1">{analysis.projects?.length ?? 0} projects detected</p>
                 </div>
             </div>
 
@@ -130,7 +145,7 @@ export default function ResumeScoreCard({ analysis, onRefresh }) {
                 </div>
             </div>
 
-            {/* Keyword Analysis */}
+            {/* Keyword Analysis — only when JD was provided */}
             {analysis.jd_text && (
                 <div className="grid sm:grid-cols-2 gap-4">
                     {analysis.matched_keywords?.length > 0 && (

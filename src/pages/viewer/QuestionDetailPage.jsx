@@ -15,7 +15,7 @@ import {
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
-
+import { updateStreak } from '@/lib/updateStreak';
 export default function QuestionDetailPage() {
     const { questionId } = useParams();
     const navigate = useNavigate();
@@ -40,8 +40,20 @@ export default function QuestionDetailPage() {
     useEffect(() => { setNoteText(currentNote?.content || ''); }, [currentNote?.id, q?.id]);
 
     const completeMut = useMutation({
-        mutationFn: () => Progress.create({ user_id: user.id, question_id: q.id, topic_id: q.topic_id, completed_at: new Date().toISOString() }),
-        onSuccess: () => { qc.invalidateQueries({ queryKey: ['progress'] }); toast.success('Marked as completed!'); },
+        mutationFn: async () => {
+            await Progress.create({
+                user_id: user.id,
+                question_id: q.id,
+                topic_id: q.topic_id,
+                completed_at: new Date().toISOString()
+            });
+            await updateStreak(user.id); // ← add this
+        },
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ['progress'] });
+            qc.invalidateQueries({ queryKey: ['me'] }); // ← refresh user so streak shows
+            toast.success('Marked as completed! 🔥');
+        },
     });
     const bookmarkMut = useMutation({
         mutationFn: () => {
@@ -145,10 +157,10 @@ export default function QuestionDetailPage() {
                                             <div className="prose prose-sm dark:prose-invert max-w-none"><ReactMarkdown>{q.explanation}</ReactMarkdown></div>
                                         </div>
                                     )}
-                                    {q.references && (
+                                    {q.reference_links && (
                                         <div className="rounded-xl bg-muted/50 p-4">
                                             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">References</p>
-                                            <p className="text-xs text-muted-foreground">{q.references}</p>
+                                            <p className="text-xs text-muted-foreground">{q.reference_links}</p>
                                         </div>
                                     )}
                                 </motion.div>

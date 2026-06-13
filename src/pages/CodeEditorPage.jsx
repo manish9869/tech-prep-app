@@ -8,8 +8,7 @@ import {
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
-
-// ── Constants ─────────────────────────────────────────────────────────────────
+import { invokeGroq } from '@/api/llm';
 
 const LANGUAGES = [
     { id: 'javascript', label: 'JavaScript', color: '#f7df1e', ext: 'js', starter: '// Write your solution here\n\nfunction solution() {\n  \n}\n\nconsole.log(solution());' },
@@ -23,9 +22,9 @@ const LANGUAGES = [
 ];
 
 const DIFFICULTY_CONFIGS = {
-    easy: { label: 'Easy', color: '#10b981', bg: 'bg-emerald-500/10', text: 'text-emerald-400', icon: '🟢', desc: 'Beginner friendly, basic logic' },
-    medium: { label: 'Medium', color: '#f59e0b', bg: 'bg-amber-500/10', text: 'text-amber-400', icon: '🟡', desc: 'Moderate complexity, common patterns' },
-    hard: { label: 'Hard', color: '#ef4444', bg: 'bg-red-500/10', text: 'text-red-400', icon: '🔴', desc: 'LeetCode Hard, advanced algorithms' },
+    easy: { label: 'Easy', color: '#10b981', bg: 'bg-emerald-500/10', text: 'text-emerald-400', icon: '🟢' },
+    medium: { label: 'Medium', color: '#f59e0b', bg: 'bg-amber-500/10', text: 'text-amber-400', icon: '🟡' },
+    hard: { label: 'Hard', color: '#ef4444', bg: 'bg-red-500/10', text: 'text-red-400', icon: '🔴' },
 };
 
 const CATEGORIES = [
@@ -41,32 +40,55 @@ const CATEGORIES = [
     { id: 'backtracking', label: '🔄 Backtracking' },
 ];
 
-// ── Anthropic API helper ──────────────────────────────────────────────────────
+// Robustly extract and parse JSON from a raw LLM string.
+// Handles: markdown fences, literal newlines inside string values, stray backticks.
+function extractJSON(raw) {
+    // 1. Strip markdown code fences if present
+    let cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
 
-async function callClaude(prompt, expectJson = false) {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            model: 'claude-sonnet-4-6',
-            max_tokens: 1000,
-            messages: [{ role: 'user', content: prompt }],
-        }),
-    });
+    // 2. Pull out the outermost { ... } block
+    const start = cleaned.indexOf('{');
+    const end = cleaned.lastIndexOf('}');
+    if (start === -1 || end === -1) throw new Error('No JSON object found in response.');
+    cleaned = cleaned.slice(start, end + 1);
 
-    if (!response.ok) throw new Error(`API error: ${response.status}`);
+    // 3. Try a straight parse first
+    try {
+        return JSON.parse(cleaned);
+    } catch (_) { /* fall through */ }
 
-    const data = await response.json();
-    const text = data.content.map(b => b.text || '').join('');
-
-    if (expectJson) {
-        const clean = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-        return JSON.parse(clean);
+    // 4. Fix literal newlines/tabs inside JSON string values
+    //    Walk char-by-char, and when inside a string, replace bare \n/\r/\t with escape sequences.
+    let fixed = '';
+    let inString = false;
+    let escaped = false;
+    for (let i = 0; i < cleaned.length; i++) {
+        const ch = cleaned[i];
+        if (escaped) {
+            fixed += ch;
+            escaped = false;
+            continue;
+        }
+        if (ch === '\\') {
+            escaped = true;
+            fixed += ch;
+            continue;
+        }
+        if (ch === '"') {
+            inString = !inString;
+            fixed += ch;
+            continue;
+        }
+        if (inString) {
+            if (ch === '\n') { fixed += '\\n'; continue; }
+            if (ch === '\r') { fixed += '\\r'; continue; }
+            if (ch === '\t') { fixed += '\\t'; continue; }
+        }
+        fixed += ch;
     }
-    return text;
-}
 
-// ── CodeEditorPage ────────────────────────────────────────────────────────────
+    return JSON.parse(fixed);
+}
 
 export default function CodeEditorPage() {
     const [lang, setLang] = useState(LANGUAGES[0]);
@@ -128,6 +150,7 @@ export default function CodeEditorPage() {
 
     const generateChallenge = async () => {
         setIsGenerating(true);
+        setCurrentChallenge(null);
         setOutput(''); setAnalysis(''); setOptimized(''); setTab('output');
         try {
             const diffConf = DIFFICULTY_CONFIGS[difficulty];
@@ -137,7 +160,9 @@ export default function CodeEditorPage() {
 
 The challenge should be NEW and UNIQUE — not a common well-known problem. Be creative.
 
-Respond in this EXACT JSON format (no markdown fences, raw JSON only):
+Return ONLY a valid JSON object with these exact fields. No markdown, no code fences, no extra text.
+For the starter_code field, use \\n for newlines (not actual line breaks) and escape any backslashes or double quotes inside the string.
+
 {
   "title": "Challenge title (creative name)",
   "difficulty": "${difficulty}",
@@ -146,17 +171,30 @@ Respond in this EXACT JSON format (no markdown fences, raw JSON only):
   "examples": [{"input": "example input", "output": "expected output", "explanation": "why"}],
   "constraints": ["constraint 1", "constraint 2"],
   "hints": ["hint 1 (subtle)", "hint 2 (more direct)"],
-  "starter_code": "Clean ${lang.label} starter code with function signature, comments, and example test calls"
+  "starter_code": "function solution() {\\n  // Write your code here\\n}\\n\\nconsole.log(solution());"
 }`;
 
-            const result = await callClaude(prompt, true);
+            // Get raw string — do NOT use parseJSON:true so we control parsing ourselves
+            const raw = await invokeGroq({ prompt, maxTokens: 2000 });
+
+            const result = extractJSON(raw);
+
+            if (!result || typeof result !== 'object' || !result.title) {
+                throw new Error('AI returned invalid data. Please try again.');
+            }
+
             setCurrentChallenge(result);
             if (result.starter_code) {
-                setCode(result.starter_code.replace(/^```[\w]*\n?/, '').replace(/```$/, '').trim());
+                // Clean up any stray markdown fences that snuck into the starter code value
+                const cleanStarter = result.starter_code
+                    .replace(/^```[\w]*\n?/, '')
+                    .replace(/```$/, '')
+                    .trim();
+                setCode(cleanStarter);
             }
             toast.success(`Challenge ready: ${result.title}`);
         } catch (err) {
-            toast.error('Failed to generate challenge');
+            toast.error('Failed to generate challenge: ' + err.message);
             console.error(err);
         } finally {
             setIsGenerating(false);
@@ -167,7 +205,7 @@ Respond in this EXACT JSON format (no markdown fences, raw JSON only):
         setIsRunning(true); setOutput(''); setTab('output');
         try {
             const prompt = `You are a ${lang.label} code executor. Run this code and return ONLY the terminal output — no explanations, no markdown, no code blocks.\n\n\`\`\`${lang.id}\n${code}\n\`\`\``;
-            const result = await callClaude(prompt);
+            const result = await invokeGroq({ prompt });
             setOutput(result || '(No output)');
         } catch (err) {
             toast.error('Failed to run code');
@@ -181,7 +219,7 @@ Respond in this EXACT JSON format (no markdown fences, raw JSON only):
         setIsAnalyzing(true); setTab('analysis');
         try {
             const prompt = `Analyze this ${lang.label} code:\n1. **Time Complexity** (Big O)\n2. **Space Complexity**\n3. **Code Quality** issues\n4. **Top 3 Improvements**\n${currentChallenge ? `\nContext: This is solving "${currentChallenge.title}" (${currentChallenge.difficulty})` : ''}\n\n\`\`\`${lang.id}\n${code}\n\`\`\``;
-            const result = await callClaude(prompt);
+            const result = await invokeGroq({ prompt });
             setAnalysis(result);
         } catch (err) {
             toast.error('Failed to analyze code');
@@ -194,7 +232,7 @@ Respond in this EXACT JSON format (no markdown fences, raw JSON only):
         setIsOptimizing(true); setTab('optimized');
         try {
             const prompt = `Optimize this ${lang.label} code for best time/space complexity. Return ONLY the improved code with brief inline comments. No markdown fences.\n\n\`\`\`${lang.id}\n${code}\n\`\`\``;
-            const result = await callClaude(prompt);
+            const result = await invokeGroq({ prompt });
             setOptimized(result.replace(/^```[\w]*\n?/, '').replace(/```$/, '').trim());
         } catch (err) {
             toast.error('Failed to optimize code');
@@ -224,7 +262,7 @@ Respond in this EXACT JSON format (no markdown fences, raw JSON only):
     };
 
     const resetCode = () => {
-        setCode(currentChallenge?.starter_code || lang.starter);
+        setCode(currentChallenge?.starter_code?.replace(/^```[\w]*\n?/, '').replace(/```$/, '').trim() || lang.starter);
         setOutput(''); setAnalysis(''); setOptimized('');
     };
 
@@ -269,13 +307,13 @@ Respond in this EXACT JSON format (no markdown fences, raw JSON only):
                 </div>
 
                 <div className="flex flex-wrap gap-3 items-end">
-                    {/* Difficulty */}
                     <div>
                         <div className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-1.5">Difficulty</div>
                         <div className="flex gap-1.5">
                             {Object.entries(DIFFICULTY_CONFIGS).map(([key, conf]) => (
                                 <button
                                     key={key}
+                                    type="button"
                                     onClick={() => setDifficulty(key)}
                                     className={`px-3 py-1.5 text-xs font-bold border transition-all ${difficulty === key
                                         ? `border-current ${conf.text} ${conf.bg}`
@@ -288,7 +326,6 @@ Respond in this EXACT JSON format (no markdown fences, raw JSON only):
                         </div>
                     </div>
 
-                    {/* Category */}
                     <div className="flex-1 min-w-[160px]">
                         <div className="text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-1.5">Topic / Category</div>
                         <Select value={category} onValueChange={setCategory}>
@@ -303,7 +340,6 @@ Respond in this EXACT JSON format (no markdown fences, raw JSON only):
                         </Select>
                     </div>
 
-                    {/* Generate Button */}
                     <Button
                         onClick={generateChallenge}
                         disabled={isGenerating}
@@ -316,13 +352,33 @@ Respond in this EXACT JSON format (no markdown fences, raw JSON only):
                     </Button>
                 </div>
 
-                {/* Active Challenge Card */}
-                <AnimatePresence>
+                <AnimatePresence mode="wait">
+                    {/* Skeleton while generating */}
+                    {isGenerating && (
+                        <motion.div
+                            key="skeleton"
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            className="mt-4 border border-zinc-800 bg-zinc-900/30 p-6 flex items-center gap-3"
+                        >
+                            <Loader2 className="w-4 h-4 text-amber-400 animate-spin flex-shrink-0" />
+                            <div className="space-y-2 flex-1">
+                                <div className="h-2.5 bg-zinc-800 rounded w-1/3 animate-pulse" />
+                                <div className="h-2 bg-zinc-800 rounded w-2/3 animate-pulse" />
+                                <div className="h-2 bg-zinc-800 rounded w-1/2 animate-pulse" />
+                            </div>
+                        </motion.div>
+                    )}
+
+                    {/* Challenge card — keyed by title so re-generating forces remount + animation */}
                     {currentChallenge && !isGenerating && (
                         <motion.div
-                            initial={{ opacity: 0, height: 0 }}
-                            animate={{ opacity: 1, height: 'auto' }}
-                            exit={{ opacity: 0, height: 0 }}
+                            key={currentChallenge.title}
+                            initial={{ opacity: 0, y: 6 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -6 }}
+                            transition={{ duration: 0.2 }}
                             className="mt-4 border border-zinc-700 bg-zinc-900/50"
                         >
                             <div className="flex items-start gap-3 p-4">
@@ -380,16 +436,22 @@ Respond in this EXACT JSON format (no markdown fences, raw JSON only):
                             </div>
                         </motion.div>
                     )}
-                </AnimatePresence>
 
-                {/* Empty state */}
-                {!currentChallenge && !isGenerating && (
-                    <div className="mt-4 border border-dashed border-zinc-800 py-6 text-center">
-                        <Target className="w-8 h-8 text-zinc-700 mx-auto mb-2" />
-                        <p className="text-zinc-600 text-xs">Select difficulty + category, then click <span className="text-amber-400 font-bold">New Challenge</span></p>
-                        <p className="text-zinc-700 text-[10px] mt-1">Every challenge is AI-generated and unique 🤖</p>
-                    </div>
-                )}
+                    {/* Empty state */}
+                    {!currentChallenge && !isGenerating && (
+                        <motion.div
+                            key="empty"
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            className="mt-4 border border-dashed border-zinc-800 py-6 text-center"
+                        >
+                            <Target className="w-8 h-8 text-zinc-700 mx-auto mb-2" />
+                            <p className="text-zinc-600 text-xs">Select difficulty + category, then click <span className="text-amber-400 font-bold">New Challenge</span></p>
+                            <p className="text-zinc-700 text-[10px] mt-1">Every challenge is AI-generated and unique 🤖</p>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
             </div>
 
             {/* Editor + Output */}
@@ -426,7 +488,6 @@ Respond in this EXACT JSON format (no markdown fences, raw JSON only):
                         </div>
                     </div>
 
-                    {/* Editor with line numbers */}
                     <div className="relative flex-1 flex overflow-hidden">
                         <div className="bg-zinc-900/60 w-12 flex-shrink-0 pt-4 select-none overflow-hidden">
                             {Array.from({ length: lineCount }, (_, i) => (
@@ -446,7 +507,6 @@ Respond in this EXACT JSON format (no markdown fences, raw JSON only):
                         />
                     </div>
 
-                    {/* Action bar */}
                     <div className="flex items-center gap-2 px-4 py-2.5 bg-zinc-900 border-t border-zinc-800 flex-wrap">
                         <Button onClick={runCode} disabled={isRunning} className="h-8 px-4 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black">
                             {isRunning ? <><Loader2 className="w-3 h-3 mr-1.5 animate-spin" />Running…</> : <><Play className="w-3 h-3 mr-1.5" />Run</>}
@@ -480,9 +540,9 @@ Respond in this EXACT JSON format (no markdown fences, raw JSON only):
                             return (
                                 <button
                                     key={t.id}
+                                    type="button"
                                     onClick={() => setTab(t.id)}
-                                    className={`flex items-center gap-1.5 px-3 py-2.5 text-xs font-semibold border-b-2 transition-colors ${tab === t.id ? colorClass : 'border-transparent text-zinc-500 hover:text-zinc-300'
-                                        }`}
+                                    className={`flex items-center gap-1.5 px-3 py-2.5 text-xs font-semibold border-b-2 transition-colors ${tab === t.id ? colorClass : 'border-transparent text-zinc-500 hover:text-zinc-300'}`}
                                 >
                                     <Icon className="w-3.5 h-3.5" /> {t.label}
                                     {t.id === 'optimized' && optimized && <span className="w-1.5 h-1.5 bg-blue-400 rounded-full ml-1" />}

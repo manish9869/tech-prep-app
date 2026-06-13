@@ -17,12 +17,18 @@ import {
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
-
+import { updateStreak } from '@/lib/updateStreak';
 // ── Supabase helpers ──────────────────────────────────────────────────────────
 
 const getUser = async () => {
     const { data: { user } } = await supabase.auth.getUser();
-    return user;
+    if (!user) return null;
+    const { data: profile } = await supabase
+        .from('profiles')
+        .select('*, current_streak, longest_streak, last_study_date')
+        .eq('id', user.id)
+        .single();
+    return profile ?? user;
 };
 
 const getTopics = async () => {
@@ -124,8 +130,9 @@ function QuestionRow({ q, isCompleted, isBookmarked, note, onBookmark, onComplet
                 }`}
         >
             {/* Row header */}
-            <button
-                className="w-full text-left p-4 flex items-start gap-3"
+            {/* Row header — outer changed to div */}
+            <div
+                className="w-full text-left p-4 flex items-start gap-3 cursor-pointer"
                 onClick={() => setOpen(o => !o)}
             >
                 <div className="flex-shrink-0 mt-0.5">
@@ -149,21 +156,21 @@ function QuestionRow({ q, isCompleted, isBookmarked, note, onBookmark, onComplet
                     </p>
                 </div>
                 <div className="flex items-center gap-1 flex-shrink-0 ml-2">
-                    <button
+                    <div
+                        role="button"
+                        tabIndex={0}
                         onClick={e => { e.stopPropagation(); onBookmark(); }}
-                        className="p-1.5 rounded-lg hover:bg-muted transition-colors"
+                        onKeyDown={e => e.key === 'Enter' && onBookmark()}
+                        className="p-1.5 rounded-lg hover:bg-muted transition-colors cursor-pointer"
                     >
                         {isBookmarked
                             ? <BookmarkCheck className="w-4 h-4 text-primary" />
                             : <Bookmark className="w-4 h-4 text-muted-foreground" />
                         }
-                    </button>
-                    {open
-                        ? <ChevronUp className="w-4 h-4 text-muted-foreground" />
-                        : <ChevronDown className="w-4 h-4 text-muted-foreground" />
-                    }
+                    </div>
+                    {open ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />}
                 </div>
-            </button>
+            </div>
 
             {/* Expanded detail */}
             <AnimatePresence>
@@ -231,10 +238,10 @@ function QuestionRow({ q, isCompleted, isBookmarked, note, onBookmark, onComplet
                                                     <div className="prose prose-sm dark:prose-invert max-w-none"><ReactMarkdown>{q.explanation}</ReactMarkdown></div>
                                                 </div>
                                             )}
-                                            {q.references && (
+                                            {q.reference_links && (
                                                 <div className="rounded-xl bg-muted/50 p-3">
                                                     <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1">References</p>
-                                                    <p className="text-xs text-muted-foreground">{q.references}</p>
+                                                    <p className="text-xs text-muted-foreground">{q.reference_links}</p>
                                                 </div>
                                             )}
                                         </motion.div>
@@ -396,12 +403,13 @@ export default function StudyPage() {
                 completed_at: new Date().toISOString(),
             });
             if (error) throw error;
+            await updateStreak(user.id);
         },
         onSuccess: () => {
             qc.invalidateQueries({ queryKey: ['progress'] });
+            qc.invalidateQueries({ queryKey: ['me'] }); // ← ADD THIS
             toast.success('✅ Marked as done!');
         },
-        onError: () => toast.error('Failed to mark as done'),
     });
 
     const undoMut = useMutation({

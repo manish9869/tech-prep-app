@@ -116,10 +116,10 @@ export default function QuestionViewDialog({ open, onOpenChange, question }) {
                         </div>
 
                         {/* References */}
-                        {question.references && (
+                        {question.reference_links && (
                             <div>
                                 <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1.5">References</p>
-                                <p className="text-xs text-muted-foreground">{question.references}</p>
+                                <p className="text-xs text-muted-foreground">{question.reference_links}</p>
                             </div>
                         )}
                     </div>

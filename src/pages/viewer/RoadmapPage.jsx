@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Topic, RoadmapTopic } from '@/api/entities';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronRight, ChevronLeft, Map, Zap, ArrowRight } from 'lucide-react';
+import { ChevronRight, ChevronLeft, Map, Zap, ArrowRight, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import PageHeader from '@/components/shared/PageHeader';
 
@@ -17,33 +17,56 @@ function MindMapPhase({ phase, index, isActive, onClick }) {
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: index * 0.08 }}
             onClick={onClick}
-            className={`relative cursor-pointer overflow-hidden transition-all duration-200 group ${isActive
-                ? 'ring-2 ring-primary shadow-xl shadow-primary/10'
-                : 'hover:shadow-lg hover:-translate-y-0.5'
+            className={`relative cursor-pointer overflow-hidden transition-all duration-200 group ${isActive ? 'shadow-xl -translate-y-1' : 'hover:shadow-lg hover:-translate-y-0.5'
                 }`}
             style={{
                 background: isActive
-                    ? 'linear-gradient(135deg, hsl(var(--card)) 0%, hsl(var(--accent)/0.3) 100%)'
+                    ? `linear-gradient(135deg, ${color}18 0%, ${color}08 100%)`
                     : 'hsl(var(--card))',
-                border: `1px solid ${isActive ? 'hsl(var(--primary)/0.4)' : 'hsl(var(--border))'}`,
+                border: isActive
+                    ? `1px solid ${color}50`
+                    : '1px solid hsl(var(--border))',
                 backdropFilter: 'blur(12px)',
+                boxShadow: isActive ? `0 8px 32px ${color}25, 0 0 0 0 transparent` : undefined,
             }}
         >
-            <div className="h-1 w-full" style={{ background: `linear-gradient(90deg, ${color}, ${color}88)` }} />
+            {/* Top color bar — thicker + full opacity when active */}
+            <div
+                className="h-1 w-full transition-all duration-200"
+                style={{
+                    background: `linear-gradient(90deg, ${color}, ${color}88)`,
+                    height: isActive ? '3px' : '2px',
+                    opacity: isActive ? 1 : 0.6,
+                }}
+            />
+
+            {/* Left accent bar when active */}
+            {isActive && (
+                <div
+                    className="absolute left-0 top-0 bottom-0 w-[3px]"
+                    style={{ background: color }}
+                />
+            )}
+
             <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity"
                 style={{ background: `linear-gradient(135deg, ${color}05, ${color}10)` }} />
 
             <div className="p-4 relative z-10">
                 <div className="flex items-center gap-2 mb-3">
-                    <div className="w-6 h-6 flex items-center justify-center text-[11px] font-black text-white flex-shrink-0"
-                        style={{ background: color }}>
+                    <div
+                        className="w-6 h-6 flex items-center justify-center text-[11px] font-black text-white flex-shrink-0 transition-all duration-200"
+                        style={{ background: color, opacity: isActive ? 1 : 0.75 }}
+                    >
                         {index + 1}
                     </div>
-                    <h3 className="font-black text-sm text-foreground">{phase.phase_name}</h3>
+                    <h3 className={`font-black text-sm transition-colors duration-200 ${isActive ? 'text-foreground' : 'text-foreground/80'}`}>
+                        {phase.phase_name}
+                    </h3>
                     {isActive && (
-                        <span className="ml-auto text-[9px] font-black uppercase tracking-widest text-primary bg-primary/10 px-1.5 py-0.5 border border-primary/20">
-                            Active
-                        </span>
+                        <CheckCircle2
+                            className="ml-auto w-3.5 h-3.5 flex-shrink-0"
+                            style={{ color }}
+                        />
                     )}
                 </div>
 

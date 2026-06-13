@@ -14,7 +14,7 @@ import { toast } from 'sonner';
 import DifficultyBadge from '@/components/shared/DifficultyBadge';
 
 export default function QuizPage() {
-    const [phase, setPhase] = useState('setup'); // setup | quiz | result
+    const [phase, setPhase] = useState('setup');
     const [config, setConfig] = useState({ topic_id: 'all', difficulty: 'all', count: 10 });
     const [quizQuestions, setQuizQuestions] = useState([]);
     const [current, setCurrent] = useState(0);
@@ -49,7 +49,6 @@ export default function QuizPage() {
         return qs;
     }, [allQs, config.topic_id, config.difficulty]);
 
-    // Timer
     useEffect(() => {
         if (phase !== 'quiz') return;
         const interval = setInterval(() => setTime(t => t + 1), 1000);
@@ -115,6 +114,7 @@ export default function QuizPage() {
     const correct = answers.filter(a => a.is_correct).length;
     const pct = quizQuestions.length > 0 ? Math.round((correct / quizQuestions.length) * 100) : 0;
 
+    // ---- SETUP ----
     if (phase === 'setup') return (
         <div className="space-y-6 max-w-2xl">
             <PageHeader title="Take a Quiz" badge="Quiz Mode" description="Test your knowledge and track your performance" />
@@ -131,69 +131,74 @@ export default function QuizPage() {
                         </div>
                     </div>
 
-                    <div className="space-y-4">
+                    <div className="space-y-5">
+                        {/* Topic */}
                         <div>
                             <label className="text-sm font-semibold mb-2 block">Topic</label>
                             <Select value={config.topic_id} onValueChange={v => setConfig(c => ({ ...c, topic_id: v }))}>
                                 <SelectTrigger className="rounded-xl">
-                                    <SelectValue placeholder="Select topic">
-                                        {config.topic_id === 'all' ? (
-                                            <span className="flex items-center gap-2">🌐 All Topics (Mixed)</span>
-                                        ) : (
-                                            (() => {
-                                                const t = topics.find(t => t.id === config.topic_id);
-                                                return t ? (
-                                                    <span className="flex items-center gap-2">
-                                                        {t.logo_url
-                                                            ? <img src={t.logo_url} alt={t.name} className="w-4 h-4 object-contain" />
-                                                            : <span className="w-4 h-4 rounded-sm flex items-center justify-center text-white text-[9px] font-black" style={{ background: t.color || '#6366f1' }}>{t.name?.[0]}</span>
-                                                        }
-                                                        {t.name}
-                                                    </span>
-                                                ) : null;
-                                            })()
-                                        )}
-                                    </SelectValue>
+                                    <SelectValue placeholder="Select topic" />
                                 </SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="all">
-                                        <span className="flex items-center gap-2">🌐 All Topics (Mixed)</span>
+                                        <div className="flex items-center gap-2">🌐 All Topics (Mixed)</div>
                                     </SelectItem>
                                     {topics.filter(t => t.is_visible !== false).map(t => (
                                         <SelectItem key={t.id} value={t.id}>
-                                            <span className="flex items-center gap-2">
+                                            <div className="flex items-center gap-2">
                                                 {t.logo_url
                                                     ? <img src={t.logo_url} alt={t.name} className="w-4 h-4 object-contain" />
-                                                    : <span className="w-4 h-4 rounded-sm flex items-center justify-center text-white text-[9px] font-black" style={{ background: t.color || '#6366f1' }}>{t.name?.[0]}</span>
+                                                    : <span className="w-4 h-4 flex items-center justify-center text-white text-[9px] font-black" style={{ background: t.color || '#6366f1' }}>{t.name?.[0]}</span>
                                                 }
                                                 {t.name}
-                                            </span>
+                                            </div>
                                         </SelectItem>
                                     ))}
                                 </SelectContent>
                             </Select>
                         </div>
 
+                        {/* Difficulty */}
                         <div>
                             <label className="text-sm font-semibold mb-2 block">Difficulty</label>
                             <div className="flex gap-2 flex-wrap">
-                                {['all', 'basic', 'medium', 'experienced'].map(d => (
-                                    <button key={d} onClick={() => setConfig(c => ({ ...c, difficulty: d }))}
-                                        className={`px-4 py-2 rounded-xl text-sm font-medium border transition-all ${config.difficulty === d ? 'bg-primary text-primary-foreground border-primary' : 'border-border hover:border-primary/50 hover:bg-muted'
-                                            }`}>
-                                        {d === 'all' ? 'All Levels' : d.charAt(0).toUpperCase() + d.slice(1)}
+                                {[
+                                    { value: 'all', label: 'All Levels' },
+                                    { value: 'basic', label: '🟢 Basic' },
+                                    { value: 'medium', label: '🟡 Medium' },
+                                    { value: 'experienced', label: '🔴 Experienced' },
+                                ].map(d => (
+                                    <button
+                                        key={d.value}
+                                        type="button"
+                                        onClick={() => setConfig(c => ({ ...c, difficulty: d.value }))}
+                                        className={`px-4 py-2 rounded-xl text-sm font-medium border transition-all ${config.difficulty === d.value
+                                            ? 'bg-primary text-primary-foreground border-primary'
+                                            : 'border-border hover:border-primary/50 hover:bg-muted'
+                                            }`}
+                                    >
+                                        {d.label}
                                     </button>
                                 ))}
                             </div>
                         </div>
 
+                        {/* Question count */}
                         <div>
                             <label className="text-sm font-semibold mb-2 block">Number of Questions</label>
                             <div className="flex gap-2 flex-wrap">
                                 {[5, 10, 15, 20, 25].map(n => (
-                                    <button key={n} onClick={() => setConfig(c => ({ ...c, count: n }))}
-                                        className={`w-14 h-10 rounded-xl text-sm font-bold border transition-all ${config.count === n ? 'bg-primary text-primary-foreground border-primary' : 'border-border hover:border-primary/50 hover:bg-muted'
-                                            }`}>{n}</button>
+                                    <button
+                                        key={n}
+                                        type="button"
+                                        onClick={() => setConfig(c => ({ ...c, count: n }))}
+                                        className={`w-14 h-10 rounded-xl text-sm font-bold border transition-all ${config.count === n
+                                            ? 'bg-primary text-primary-foreground border-primary'
+                                            : 'border-border hover:border-primary/50 hover:bg-muted'
+                                            }`}
+                                    >
+                                        {n}
+                                    </button>
                                 ))}
                             </div>
                         </div>
@@ -204,16 +209,17 @@ export default function QuizPage() {
                     </div>
 
                     <Button onClick={startQuiz} className="w-full rounded-xl h-12 text-base font-bold shadow-lg" disabled={mcqPool.length === 0}>
-                        <Zap className="w-5 h-5 mr-2" />Start Quiz!
+                        <Zap className="w-5 h-5 mr-2" /> Start Quiz!
                     </Button>
                 </CardContent>
             </Card>
         </div>
     );
 
+    // ---- QUIZ ----
     if (phase === 'quiz') {
         const q = quizQuestions[current];
-        const progress = ((current) / quizQuestions.length) * 100;
+        const progress = (current / quizQuestions.length) * 100;
         return (
             <div className="max-w-2xl space-y-4">
                 <div className="flex items-center justify-between mb-2">
@@ -245,12 +251,18 @@ export default function QuizPage() {
                                             else btnClass = 'border-border opacity-50';
                                         }
                                         return (
-                                            <button key={i} onClick={() => handleAnswer(i)}
-                                                className={`w-full text-left px-4 py-3.5 rounded-xl border-2 text-sm font-medium transition-all flex items-center gap-3 ${btnClass}`}>
+                                            <button
+                                                key={i}
+                                                type="button"
+                                                onClick={() => handleAnswer(i)}
+                                                className={`w-full text-left px-4 py-3.5 rounded-xl border-2 text-sm font-medium transition-all flex items-center gap-3 ${btnClass}`}
+                                            >
                                                 <span className="w-7 h-7 rounded-full border-2 border-current flex items-center justify-center text-xs font-bold flex-shrink-0">
-                                                    {selected !== null && i === q.correct_option_index ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> :
-                                                        selected !== null && i === selected && selected !== q.correct_option_index ? <XCircle className="w-4 h-4 text-red-600" /> :
-                                                            String.fromCharCode(65 + i)}
+                                                    {selected !== null && i === q.correct_option_index
+                                                        ? <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                                                        : selected !== null && i === selected && selected !== q.correct_option_index
+                                                            ? <XCircle className="w-4 h-4 text-red-600" />
+                                                            : String.fromCharCode(65 + i)}
                                                 </span>
                                                 {opt.text}
                                             </button>
@@ -265,6 +277,7 @@ export default function QuizPage() {
         );
     }
 
+    // ---- RESULT ----
     if (phase === 'result') {
         const grade = pct >= 80 ? '🏆 Excellent!' : pct >= 60 ? '👍 Good Job!' : '📚 Keep Practicing!';
         return (
@@ -310,10 +323,10 @@ export default function QuizPage() {
 
                             <div className="flex gap-3 pt-2">
                                 <Button variant="outline" onClick={() => setPhase('setup')} className="flex-1 rounded-xl">
-                                    <RotateCcw className="w-4 h-4 mr-2" />New Quiz
+                                    <RotateCcw className="w-4 h-4 mr-2" /> New Quiz
                                 </Button>
                                 <Button onClick={startQuiz} className="flex-1 rounded-xl">
-                                    <Zap className="w-4 h-4 mr-2" />Retry
+                                    <Zap className="w-4 h-4 mr-2" /> Retry
                                 </Button>
                             </div>
                         </CardContent>
@@ -322,4 +335,6 @@ export default function QuizPage() {
             </div>
         );
     }
+
+    return null;
 }

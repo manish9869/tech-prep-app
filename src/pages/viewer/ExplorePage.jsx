@@ -66,49 +66,66 @@ export default function ExplorePage() {
                 <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                     {filtered.map((t, i) => (
                         <motion.div key={t.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
-                            <Card className="rounded-2xl overflow-hidden hover:shadow-xl hover:-translate-y-1 transition-all duration-200 group cursor-pointer h-full border-border hover:border-primary/30">
-                                <Link to={`/study/${t.id}`} className="block h-full">
-                                    <div className="relative h-28 flex items-center justify-center" style={{ background: `linear-gradient(135deg, ${t.color || 'hsl(var(--primary))'}, ${t.color || 'hsl(var(--primary))'}99)` }}>
+                            <div
+                                className="overflow-hidden border transition-all hover:-translate-y-0.5 hover:shadow-lg h-full"
+                                style={{
+                                    background: `linear-gradient(135deg, hsl(var(--card)) 0%, ${t.color || '#6366f1'}0a 100%)`,
+                                    borderColor: `${t.color || '#6366f1'}30`,
+                                }}
+                            >
+                                {/* Accent bar — same as admin cards */}
+                                <div className="h-1 w-full" style={{ background: `linear-gradient(90deg, ${t.color || '#6366f1'}, ${t.color || '#6366f1'}44)` }} />
+
+                                <Link to={`/study/${t.id}`} className="block p-5">
+                                    <div className="flex items-start gap-3">
                                         {t.logo_url ? (
-                                            <img src={t.logo_url} alt={t.name} className="w-16 h-16 object-contain drop-shadow-lg" />
+                                            <img src={t.logo_url} alt={t.name} className="w-12 h-12 object-contain p-1 border border-border bg-muted/30 flex-shrink-0" />
                                         ) : (
-                                            <span className="text-5xl font-black text-white/90 drop-shadow">{t.name?.[0]}</span>
-                                        )}
-                                        {t.pct === 100 && (
-                                            <div className="absolute top-3 right-3 bg-white/20 backdrop-blur-sm rounded-full p-1.5">
-                                                <Star className="w-4 h-4 text-yellow-300 fill-yellow-300" />
+                                            <div
+                                                className="w-12 h-12 flex items-center justify-center text-white font-black text-lg flex-shrink-0"
+                                                style={{ background: t.color || '#6366f1' }}
+                                            >
+                                                {t.name?.[0]?.toUpperCase()}
                                             </div>
                                         )}
+                                        <div className="flex-1 min-w-0">
+                                            <h3 className="font-black text-foreground truncate">{t.name}</h3>
+                                            <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{t.description || 'No description'}</p>
+                                        </div>
                                     </div>
-                                    <CardContent className="p-4">
-                                        <h3 className="font-bold text-foreground group-hover:text-primary transition-colors">{t.name}</h3>
-                                        {t.description && <p className="text-xs text-muted-foreground line-clamp-2 mt-1">{t.description}</p>}
-                                        <div className="mt-3 space-y-1.5">
-                                            <div className="flex justify-between text-xs">
-                                                <span className="text-muted-foreground">{t.done}/{t.totalQ} done</span>
-                                                <span className="font-semibold text-foreground">{t.pct}%</span>
-                                            </div>
-                                            <ProgressBar value={t.pct} className="h-1.5 rounded-full" />
+
+                                    {/* Progress — viewer-only addition */}
+                                    <div className="mt-4 space-y-1.5">
+                                        <div className="flex justify-between text-xs">
+                                            <span className="text-muted-foreground">{t.done}/{t.totalQ} done</span>
+                                            <span className="font-semibold text-foreground">{t.pct}%</span>
                                         </div>
-                                        <div className="flex items-center justify-between mt-3">
-                                            <span className="text-xs text-muted-foreground">{t.totalQ} questions</span>
-                                            <div className="flex items-center gap-2">
-                                                <button
-                                                    onClick={(e) => handleExportPDF(e, t)}
-                                                    className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
-                                                    title="Export Q&A PDF"
-                                                >
-                                                    <FileText className="w-3 h-3" /> PDF
-                                                </button>
-                                                <span className="text-xs text-primary font-semibold flex items-center gap-1">
-                                                    {t.done === 0 ? 'Start' : t.pct === 100 ? 'Review' : 'Continue'}
-                                                    <ArrowRight className="w-3 h-3" />
-                                                </span>
-                                            </div>
+                                        <ProgressBar value={t.pct} className="h-1.5" />
+                                    </div>
+
+                                    <div
+                                        className="flex items-center justify-between mt-4 pt-3 border-t"
+                                        style={{ borderColor: `${t.color || '#6366f1'}20` }}
+                                    >
+                                        <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 bg-muted text-muted-foreground">
+                                            {t.totalQ} questions
+                                        </span>
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                onClick={(e) => handleExportPDF(e, t)}
+                                                className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
+                                                title="Export Q&A PDF"
+                                            >
+                                                <FileText className="w-3 h-3" /> PDF
+                                            </button>
+                                            <span className="text-xs font-semibold flex items-center gap-1" style={{ color: t.color || '#6366f1' }}>
+                                                {t.done === 0 ? 'Start' : t.pct === 100 ? 'Review' : 'Continue'}
+                                                <ArrowRight className="w-3 h-3" />
+                                            </span>
                                         </div>
-                                    </CardContent>
+                                    </div>
                                 </Link>
-                            </Card>
+                            </div>
                         </motion.div>
                     ))}
                 </div>
