@@ -21,7 +21,7 @@ const defaultForm = {
     topic_id: '', topic_name: '', title: '', description: '', difficulty: 'basic',
     type: 'theory', experience_level: 'fresher', code_snippet: '', code_language: 'java',
     answer: '', explanation: '', options: [], correct_option_index: 0,
-    tags: [], company_tags: [], references: '', status: 'published', is_visible: true,
+    tags: [], company_tags: [], reference_links: '', status: 'published', is_visible: true,
 };
 
 async function invokeLLM(prompt) {
@@ -278,7 +278,7 @@ export default function QuestionFormDialog({ open, onOpenChange, editQuestion, t
 
                                 <div>
                                     <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">References / Links</Label>
-                                    <Textarea value={form.references} onChange={e => set('references', e.target.value)} className="rounded-xl text-sm" rows={2} placeholder="MDN, official docs, YouTube links, etc." />
+                                    <Textarea value={form.reference_links} onChange={e => set('reference_links', e.target.value)} className="rounded-xl text-sm" rows={2} placeholder="MDN, official docs, YouTube links, etc." />
                                 </div>
                             </TabsContent>
 

@@ -231,10 +231,10 @@ function QuestionRow({ q, isCompleted, isBookmarked, note, onBookmark, onComplet
                                                     <div className="prose prose-sm dark:prose-invert max-w-none"><ReactMarkdown>{q.explanation}</ReactMarkdown></div>
                                                 </div>
                                             )}
-                                            {q.references && (
+                                            {q.reference_links && (
                                                 <div className="rounded-xl bg-muted/50 p-3">
                                                     <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1">References</p>
-                                                    <p className="text-xs text-muted-foreground">{q.references}</p>
+                                                    <p className="text-xs text-muted-foreground">{q.reference_links}</p>
                                                 </div>
                                             )}
                                         </motion.div>

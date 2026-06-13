@@ -15,7 +15,6 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { motion } from 'framer-motion';
 
 export default function ViewerDashboard() {
-    // ✅ Changed: use profile from AuthContext instead of base44.auth.me()
     const { profile: user } = useAuth();
     const qc = useQueryClient();
     const [resettingId, setResettingId] = useState(null);
@@ -196,56 +195,78 @@ export default function ViewerDashboard() {
                     <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
                         {topicProgress.map((t, i) => (
                             <motion.div key={t.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 + i * 0.04 }}>
-                                <div className="group relative overflow-hidden border border-border hover:border-primary/50 hover:shadow-xl transition-all duration-300 bg-card">
-                                    <div className="h-1 w-full" style={{ background: t.color || 'hsl(var(--primary))' }} />
-                                    <div className="relative h-24 flex items-center justify-center overflow-hidden"
-                                        style={{ background: `linear-gradient(135deg, ${t.color || 'hsl(var(--primary))'}22 0%, ${t.color || 'hsl(var(--primary))'}08 100%)` }}>
-                                        <div className="absolute inset-0 opacity-5"
-                                            style={{ backgroundImage: 'radial-gradient(circle, currentColor 1px, transparent 1px)', backgroundSize: '16px 16px' }} />
-                                        {t.logo_url ? (
-                                            <img src={t.logo_url} alt={t.name} className="w-16 h-16 object-contain drop-shadow-lg relative z-10" />
-                                        ) : (
-                                            <div className="w-16 h-16 flex items-center justify-center text-white font-black text-3xl relative z-10"
-                                                style={{ background: t.color || 'hsl(var(--primary))' }}>{t.name?.[0]?.toUpperCase()}</div>
-                                        )}
-                                        {t.pct === 100 && (
-                                            <div className="absolute top-2 right-2 z-10">
-                                                <div className="bg-amber-400 text-amber-900 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-widest flex items-center gap-1">
+                                <div
+                                    className="group overflow-hidden border transition-all hover:-translate-y-0.5 hover:shadow-lg"
+                                    style={{
+                                        background: `linear-gradient(135deg, hsl(var(--card)) 0%, ${t.color || '#6366f1'}0a 100%)`,
+                                        borderColor: `${t.color || '#6366f1'}30`,
+                                    }}
+                                >
+                                    <div className="h-1 w-full" style={{ background: `linear-gradient(90deg, ${t.color || '#6366f1'}, ${t.color || '#6366f1'}44)` }} />
+
+                                    <div className="p-5">
+                                        <div className="flex items-start gap-3 mb-4">
+                                            {t.logo_url ? (
+                                                <img src={t.logo_url} alt={t.name} className="w-12 h-12 object-contain p-1 border border-border bg-muted/30 flex-shrink-0" />
+                                            ) : (
+                                                <div
+                                                    className="w-12 h-12 flex items-center justify-center text-white font-black text-lg flex-shrink-0"
+                                                    style={{ background: t.color || '#6366f1' }}
+                                                >
+                                                    {t.name?.[0]?.toUpperCase()}
+                                                </div>
+                                            )}
+                                            <div className="flex-1 min-w-0">
+                                                <h4 className="font-black text-sm text-foreground group-hover:text-primary transition-colors leading-tight truncate">
+                                                    {t.name}
+                                                </h4>
+                                                <p className="text-[10px] text-muted-foreground mt-0.5 font-medium">
+                                                    {t.totalQ} questions · {t.done} completed
+                                                </p>
+                                            </div>
+                                            {t.pct === 100 && (
+                                                <div className="bg-amber-400 text-amber-900 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-widest flex items-center gap-1 flex-shrink-0">
                                                     <Trophy className="w-2.5 h-2.5" /> Done
                                                 </div>
-                                            </div>
-                                        )}
-                                        {t.pct > 0 && t.pct < 100 && (
-                                            <div className="absolute top-2 right-2 z-10">
-                                                <div className="bg-primary/90 text-primary-foreground px-1.5 py-0.5 text-[9px] font-black uppercase tracking-widest">{t.pct}%</div>
-                                            </div>
-                                        )}
-                                    </div>
-                                    <div className="p-4">
-                                        <div className="flex items-start justify-between gap-2 mb-3">
-                                            <div>
-                                                <h4 className="font-black text-sm text-foreground group-hover:text-primary transition-colors leading-tight">{t.name}</h4>
-                                                <p className="text-[10px] text-muted-foreground mt-0.5 font-medium">{t.totalQ} questions · {t.done} completed</p>
-                                            </div>
+                                            )}
                                         </div>
+
                                         <div className="space-y-1.5 mb-4">
+                                            <div className="flex justify-between text-[10px]">
+                                                <span className="text-muted-foreground">{t.done}/{t.totalQ} done</span>
+                                                <span className="font-bold text-foreground">{t.pct}%</span>
+                                            </div>
                                             <div className="h-1.5 bg-muted overflow-hidden">
-                                                <div className="h-full transition-all duration-700"
-                                                    style={{ width: `${t.pct}%`, background: t.pct === 100 ? '#10b981' : (t.color || 'hsl(var(--primary))') }} />
+                                                <div
+                                                    className="h-full transition-all duration-700"
+                                                    style={{
+                                                        width: `${t.pct}%`,
+                                                        background: t.pct === 100 ? '#10b981' : (t.color || 'hsl(var(--primary))'),
+                                                    }}
+                                                />
                                             </div>
                                         </div>
-                                        <div className="flex gap-1.5">
+
+                                        <div
+                                            className="flex items-center justify-between pt-3 border-t gap-1.5"
+                                            style={{ borderColor: `${t.color || '#6366f1'}20` }}
+                                        >
                                             <Link to={`/study/${t.id}`} className="flex-1">
-                                                <Button size="sm" className="w-full text-xs font-black h-8"
-                                                    style={{ background: t.color || 'hsl(var(--primary))', color: 'white', border: 'none' }}>
-                                                    {t.done === 0 ? '🚀 Start' : t.pct === 100 ? '🏆 Review' : '▶ Continue'}
+                                                <Button
+                                                    size="sm"
+                                                    variant="ghost"
+                                                    className="w-full text-xs font-bold h-8 justify-start gap-1.5"
+                                                    style={{ color: t.color || 'hsl(var(--primary))' }}
+                                                >
+                                                    {t.done === 0 ? 'Start' : t.pct === 100 ? 'Review' : 'Continue'}
+                                                    <ArrowRight className="w-3 h-3" />
                                                 </Button>
                                             </Link>
-                                            <Button size="sm" variant="outline" className="text-xs px-2 h-8" onClick={() => handleExportPDF(t)}>
+                                            <Button size="sm" variant="ghost" className="text-xs px-2 h-8 text-muted-foreground hover:text-foreground" onClick={() => handleExportPDF(t)}>
                                                 <FileText className="w-3.5 h-3.5" />
                                             </Button>
                                             {t.done > 0 && (
-                                                <Button size="sm" variant="outline" className="text-xs px-2 h-8"
+                                                <Button size="sm" variant="ghost" className="text-xs px-2 h-8 text-muted-foreground hover:text-foreground"
                                                     onClick={() => resetProgress(t.id)} disabled={resettingId === t.id}>
                                                     <RotateCcw className={`w-3.5 h-3.5 ${resettingId === t.id ? 'animate-spin' : ''}`} />
                                                 </Button>

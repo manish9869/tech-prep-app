@@ -145,10 +145,10 @@ export default function QuestionDetailPage() {
                                             <div className="prose prose-sm dark:prose-invert max-w-none"><ReactMarkdown>{q.explanation}</ReactMarkdown></div>
                                         </div>
                                     )}
-                                    {q.references && (
+                                    {q.reference_links && (
                                         <div className="rounded-xl bg-muted/50 p-4">
                                             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">References</p>
-                                            <p className="text-xs text-muted-foreground">{q.references}</p>
+                                            <p className="text-xs text-muted-foreground">{q.reference_links}</p>
                                         </div>
                                     )}
                                 </motion.div>
