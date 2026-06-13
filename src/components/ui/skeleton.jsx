@@ -12,5 +12,3 @@ function Skeleton({
 }
 
 export { Skeleton }
-
-
