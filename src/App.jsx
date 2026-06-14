@@ -40,6 +40,7 @@ import MockInterviewPage from '@/pages/viewer/MockInterviewPage';
 import CodeEditorPage from '@/pages/CodeEditorPage';
 import RoadmapPage from '@/pages/viewer/RoadmapPage';
 import ResumeAnalyzerPage from '@/pages/viewer/ResumeAnalyzerPage';
+import { SpeedInsights } from "@vercel/speed-insights/react"
 
 // ✅ RoleRouter now uses profile from AuthContext instead of base44.auth.me()
 function RoleRouter() {
@@ -132,6 +133,7 @@ function App() {
             <AuthenticatedApp />
           </Router>
           <Toaster />
+          <SpeedInsights />
         </QueryClientProvider>
       </AuthProvider>
     </ThemeProvider>
