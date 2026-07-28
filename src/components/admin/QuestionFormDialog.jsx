@@ -22,7 +22,15 @@ const defaultForm = {
     type: 'theory', experience_level: 'fresher', code_snippet: '', code_language: 'java',
     answer: '', explanation: '', options: [], correct_option_index: 0,
     tags: [], company_tags: [], reference_links: '', status: 'published', is_visible: true,
+    round: '',
 };
+
+const ROUNDS = [
+    { value: 'screening', label: '📋 1st Round · Screening' },
+    { value: 'technical', label: '💻 2nd Round · Technical' },
+    { value: 'manager', label: '🎯 Final Round · Manager' },
+    { value: 'hr', label: '👔 HR Round' },
+];
 
 
 export default function QuestionFormDialog({ open, onOpenChange, editQuestion, topics }) {
@@ -74,7 +82,7 @@ export default function QuestionFormDialog({ open, onOpenChange, editQuestion, t
         if (!form.title.trim()) return toast.error('Title is required');
         if (!form.topic_id) return toast.error('Please select a topic');
         const topic = topics.find(t => t.id === form.topic_id);
-        const data = { ...form, topic_name: topic?.name || '' };
+        const data = { ...form, topic_name: topic?.name || '', round: form.round || null };
         if (editQuestion) updateMut.mutate({ id: editQuestion.id, d: data });
         else createMut.mutate(data);
     };
@@ -229,6 +237,18 @@ export default function QuestionFormDialog({ open, onOpenChange, editQuestion, t
                                             </SelectContent>
                                         </Select>
                                     </div>
+                                </div>
+
+                                <div>
+                                    <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Mock Interview Round</Label>
+                                    <Select value={form.round || 'none'} onValueChange={v => set('round', v === 'none' ? '' : v)}>
+                                        <SelectTrigger className="mt-1.5 rounded-xl"><SelectValue /></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="none">— Not tagged (auto-detected from type) —</SelectItem>
+                                            {ROUNDS.map(r => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}
+                                        </SelectContent>
+                                    </Select>
+                                    <p className="text-xs text-muted-foreground mt-1">Which Mock Interview round this question appears in. Leave untagged to fall back to a type/difficulty guess.</p>
                                 </div>
 
                                 <div className="flex items-center gap-3 p-3 rounded-xl bg-muted/50">

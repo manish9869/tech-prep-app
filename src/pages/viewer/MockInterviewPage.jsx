@@ -171,7 +171,10 @@ export default function MockInterviewPage() {
         let qs = techFilteredQs;
         if (config.exp_level !== 'all') qs = qs.filter(q => q.experience_level === config.exp_level || !q.experience_level);
         const round = ROUNDS.find(r => r.id === config.round);
-        if (round) qs = qs.filter(round.match);
+        // Admin-tagged `round` wins when present; untagged questions (round === null,
+        // not yet re-tagged since this field was added) fall back to the old
+        // type/difficulty heuristic so they still show up somewhere.
+        if (round) qs = qs.filter(q => (q.round ? q.round === config.round : round.match(q)));
         return qs;
     }, [techFilteredQs, config.exp_level, config.round]);
 
