@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
-import { supabase } from "@/api/supabaseClient";
+import React, { useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
+import { resetPassword } from "@/api/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -8,25 +8,12 @@ import { Lock, Loader2, AlertTriangle } from "lucide-react";
 import AuthLayout from "@/components/AuthLayout";
 
 export default function ResetPassword() {
+    const [searchParams] = useSearchParams();
+    const token = searchParams.get("token");
     const [newPassword, setNewPassword] = useState("");
     const [confirmPassword, setConfirmPassword] = useState("");
     const [error, setError] = useState("");
     const [loading, setLoading] = useState(false);
-    const [validSession, setValidSession] = useState(false);
-    const [checking, setChecking] = useState(true);
-
-    useEffect(() => {
-        // Supabase puts the recovery token in the URL hash
-        // onAuthStateChange picks it up automatically
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-            if (event === "PASSWORD_RECOVERY") {
-                setValidSession(true);
-            }
-            setChecking(false);
-        });
-
-        return () => subscription.unsubscribe();
-    }, []);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -37,9 +24,7 @@ export default function ResetPassword() {
         }
         setLoading(true);
         try {
-            const { error } = await supabase.auth.updateUser({ password: newPassword });
-            if (error) throw error;
-            await supabase.auth.signOut();
+            await resetPassword(token, newPassword);
             window.location.href = "/login";
         } catch (err) {
             setError(err.message || "Failed to reset password");
@@ -48,15 +33,7 @@ export default function ResetPassword() {
         }
     };
 
-    if (checking) {
-        return (
-            <div className="fixed inset-0 flex items-center justify-center bg-background">
-                <div className="w-10 h-10 border-4 border-primary/30 border-t-primary rounded-full animate-spin" />
-            </div>
-        );
-    }
-
-    if (!validSession) {
+    if (!token) {
         return (
             <AuthLayout
                 icon={AlertTriangle}

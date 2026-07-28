@@ -1,6 +1,6 @@
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/api/supabaseClient';
+import { getCurrentUser } from '@/api/auth';
 import { Progress, Bookmark, QuizAttempt } from '@/api/entities';
 import PageHeader from '@/components/shared/PageHeader';
 import { Card, CardContent } from '@/components/ui/card';
@@ -25,12 +25,7 @@ const BADGES = [
 export default function AchievementsPage() {
     const { data: userData } = useQuery({
         queryKey: ['me'],
-        queryFn: async () => {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return null;
-            const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-            return { ...user, ...profile };
-        },
+        queryFn: getCurrentUser,
     });
     const user = userData;
 

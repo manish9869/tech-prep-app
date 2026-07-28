@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/api/supabaseClient';
+import { getCurrentUser } from '@/api/auth';
 import { Topic, Question, Progress, Bookmark, QuizAttempt } from '@/api/entities';
 import PageHeader from '@/components/shared/PageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -18,10 +18,7 @@ const PIE_COLORS = ['hsl(245,58%,51%)', 'hsl(152,60%,40%)', 'hsl(38,92%,50%)', '
 export default function AnalyticsPage() {
     const { data: user } = useQuery({
         queryKey: ['me'],
-        queryFn: async () => {
-            const { data: { user } } = await supabase.auth.getUser();
-            return user;
-        },
+        queryFn: getCurrentUser,
     });
 
     const { data: topics = [] } = useQuery({

@@ -1,5 +1,5 @@
 import React, { createContext, useState, useContext, useEffect } from 'react'
-import { supabase } from '@/api/supabaseClient'
+import { getCurrentUser, logout as apiLogout, refreshSession } from '@/api/auth'
 
 const AuthContext = createContext()
 
@@ -11,57 +11,46 @@ export const AuthProvider = ({ children }) => {
     const [isLoadingPublicSettings] = useState(false) // kept for App.jsx compatibility
     const [authError, setAuthError] = useState(null)
 
+    const applyUser = (data) => {
+        setUser(data)
+        setProfile(data)
+        setIsAuthenticated(true)
+    }
+
+    const clearUser = () => {
+        setUser(null)
+        setProfile(null)
+        setIsAuthenticated(false)
+    }
+
     useEffect(() => {
-        // Get initial session on mount
-        supabase.auth.getSession().then(({ data: { session } }) => {
-            if (session?.user) {
-                setUser(session.user)
-                setIsAuthenticated(true)
-                fetchProfile(session.user.id)
-            } else {
+        // Silently exchange the httpOnly refresh cookie (if any) for a fresh access token
+        // on every app load — this is what keeps a user logged in across a hard refresh.
+        (async () => {
+            try {
+                const data = await refreshSession()
+                applyUser(data)
+            } catch {
+                clearUser()
+            } finally {
                 setIsLoadingAuth(false)
             }
-        })
-
-        // Listen for login / logout / token refresh
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-            if (session?.user) {
-                setUser(session.user)
-                setIsAuthenticated(true)
-                fetchProfile(session.user.id)
-            } else {
-                setUser(null)
-                setProfile(null)
-                setIsAuthenticated(false)
-                setIsLoadingAuth(false)
-            }
-        })
-
-        return () => subscription.unsubscribe()
+        })()
     }, [])
 
-    const fetchProfile = async (userId) => {
+    const fetchProfile = async () => {
         try {
-            const { data, error } = await supabase
-                .from('profiles')
-                .select('*')
-                .eq('id', userId)
-                .single()
-            if (error) throw error
-            setProfile(data)
+            const data = await getCurrentUser()
+            if (!data) throw new Error('Not authenticated')
+            applyUser(data)
         } catch (err) {
-            console.error('Profile fetch error:', err)
             setAuthError({ type: 'profile_error', message: err.message })
-        } finally {
-            setIsLoadingAuth(false)
         }
     }
 
     const logout = async () => {
-        await supabase.auth.signOut()
-        setUser(null)
-        setProfile(null)
-        setIsAuthenticated(false)
+        await apiLogout()
+        clearUser()
     }
 
     const navigateToLogin = () => {
@@ -79,6 +68,7 @@ export const AuthProvider = ({ children }) => {
             logout,
             navigateToLogin,
             fetchProfile,
+            applyUser,
         }}>
             {children}
         </AuthContext.Provider>

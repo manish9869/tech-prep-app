@@ -3,15 +3,8 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Upload, CheckCircle2, X, Sparkles, Loader2, ChevronDown } from 'lucide-react';
 import { toast } from 'sonner';
-import { useQuery } from '@tanstack/react-query';
-import { Topic, ResumeAnalysis } from '@/api/entities';
-import { supabase } from '@/api/supabaseClient';
+import { ResumeAnalysis, uploadResume } from '@/api/entities';
 import { invokeResumeAnalysis } from '@/api/llm';
-import * as pdfjsLib from 'pdfjs-dist';
-import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-import mammoth from 'mammoth';
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
 const EXPERIENCE_LEVELS = [
     { value: 'fresher', label: 'Fresher (0–1 years)', emoji: '🌱' },
@@ -40,58 +33,6 @@ const FOCUS_AREAS = [
 ];
 
 const MAX_FILE_SIZE_MB = 10;
-async function uploadFileToSupabase(file) {
-    const ext = file.name.split('.').pop();
-    const path = `resumes/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-
-    console.log('⬆️ Uploading to path:', path); // ADD THIS
-
-    const { data, error } = await supabase.storage  // capture data too
-        .from('uploads')
-        .upload(path, file, {
-            cacheControl: '3600',
-            upsert: false,
-        });
-
-    console.log('Upload result:', { data, error }); // ADD THIS
-
-    if (error) throw new Error('File upload failed: ' + error.message);
-
-    const { data: urlData } = supabase.storage.from('uploads').getPublicUrl(path);
-    console.log('Public URL:', urlData.publicUrl); // ADD THIS
-    return urlData.publicUrl;
-}
-async function extractTextFromFile(file) {
-    const ext = file.name.split('.').pop().toLowerCase();
-
-    if (ext === 'txt') {
-        return await file.text();
-    }
-
-    if (ext === 'pdf') {
-        const arrayBuffer = await file.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-        let text = '';
-        for (let i = 1; i <= pdf.numPages; i++) {
-            const page = await pdf.getPage(i);
-            const content = await page.getTextContent();
-            text += content.items.map(item => item.str).join(' ') + '\n';
-        }
-        return text;
-    }
-
-    if (ext === 'docx') {
-        const arrayBuffer = await file.arrayBuffer();
-        const result = await mammoth.extractRawText({ arrayBuffer });
-        return result.value;
-    }
-
-    if (ext === 'doc') {
-        throw new Error('Legacy .doc files are not supported. Please convert to PDF, DOCX, or TXT.');
-    }
-
-    throw new Error(`Unsupported file type ".${ext}". Please upload PDF, DOCX, or TXT.`);
-}
 
 export default function ResumeUploadPanel({ user, onComplete, analyzing, setAnalyzing }) {
     const [file, setFile] = useState(null);
@@ -129,16 +70,8 @@ export default function ResumeUploadPanel({ user, onComplete, analyzing, setAnal
         setAnalyzing(true);
 
         try {
-            const [resumeText, file_url] = await Promise.all([
-                extractTextFromFile(file),
-                uploadFileToSupabase(file),
-            ]);
-
-            if (!resumeText || resumeText.trim().length < 50) {
-                throw new Error('Could not extract readable text from this file. Try a different format.');
-            }
-
-            const truncatedResumeText = resumeText.slice(0, 8000);
+            const { file_url, extracted_text } = await uploadResume(file);
+            const truncatedResumeText = extracted_text.slice(0, 8000);
             const expInfo = EXPERIENCE_LEVELS.find(e => e.value === experienceLevel);
             const typeInfo = INTERVIEW_TYPES.find(t => t.value === interviewType);
             const focusLabels = focusAreas

@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Topic } from '@/api/entities';
-import { uploadFile } from '@/api/entities';
+import { Topic, uploadTopicLogo } from '@/api/entities';
 import PageHeader from '@/components/shared/PageHeader';
 import EmptyState from '@/components/shared/EmptyState';
 import { Button } from '@/components/ui/button';
@@ -102,16 +101,15 @@ export default function TopicManagement() {
         else createMut.mutate(formData);
     };
 
-    // ✅ Changed: use Supabase storage instead of base44.integrations.Core.UploadFile
     const handleLogoUpload = async (e) => {
         const file = e.target.files?.[0];
         if (!file) return;
         setUploading(true);
         try {
-            const { file_url } = await uploadFile(file, 'uploads', 'topics');
+            const { file_url } = await uploadTopicLogo(file);
             setFormData(f => ({ ...f, logo_url: file_url }));
         } catch (err) {
-            toast.error('Upload failed');
+            toast.error('Upload failed: ' + err.message);
         } finally {
             setUploading(false);
         }
