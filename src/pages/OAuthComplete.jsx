@@ -1,13 +1,27 @@
 import React, { useEffect } from "react";
-import { refreshSession } from "@/api/auth";
+import { refreshSession, getCurrentUser } from "@/api/auth";
+import { setAccessToken } from "@/api/httpClient";
 
-// Google OAuth finishes with a full-page redirect from the backend (which has already set
-// the httpOnly refresh cookie) — this page's only job is to exchange that cookie for an
-// access token via the same silent refresh AuthContext uses on load, then continue in.
+// Google OAuth finishes with a full-page redirect from the backend, which also set an
+// httpOnly refresh cookie for future silent refreshes. But frontend and backend live on
+// different vercel.app subdomains, and browsers that block third-party cookies (increasingly
+// the default) drop that cookie when we try to send it back cross-site via fetch — so login
+// can't depend on it here. The backend also puts the access token straight in this URL,
+// which sidesteps that entirely; the cookie-based refresh is only a fallback.
 export default function OAuthComplete() {
     useEffect(() => {
-        refreshSession()
-            .then(() => { window.location.href = "/"; })
+        const token = new URLSearchParams(window.location.search).get("token");
+        window.history.replaceState({}, document.title, window.location.pathname);
+
+        const finish = token
+            ? (() => { setAccessToken(token); return getCurrentUser(); })()
+            : refreshSession();
+
+        Promise.resolve(finish)
+            .then((user) => {
+                if (!user) throw new Error("no user");
+                window.location.href = "/";
+            })
             .catch(() => { window.location.href = "/login?error=google"; });
     }, []);
 
