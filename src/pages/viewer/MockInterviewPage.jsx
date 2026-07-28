@@ -1,16 +1,15 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { invokeLLM } from '@/api/llm';
+import { invokeGroq } from '@/api/llm';
 import { Topic, Question } from '@/api/entities';
 import PageHeader from '@/components/shared/PageHeader';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import {
-    Mic, Clock, ChevronRight, ChevronLeft, RotateCcw, CheckCircle2,
+    Mic, Volume2, VolumeX, Clock, ChevronRight, ChevronLeft, RotateCcw,
     Brain, Zap, Sparkles, Loader2, ThumbsUp, ThumbsDown, AlertCircle,
     Target,
 } from 'lucide-react';
@@ -19,10 +18,71 @@ import ReactMarkdown from 'react-markdown';
 import DifficultyBadge from '@/components/shared/DifficultyBadge';
 import { toast } from 'sonner';
 
-const MODES = [
-    { id: 'technical', label: '💻 Technical Round', desc: 'DSA, system design, coding questions' },
-    { id: 'hr', label: '👔 HR Round', desc: 'Behavioural, soft skills, scenario questions' },
-    { id: 'mixed', label: '🔀 Mixed Round', desc: 'Combination of technical and HR questions' },
+// Free, instant, client-side answer-coverage check — no network call, no AI. Compares the
+// candidate's answer against significant keywords pulled from the model answer, so there's
+// a useful signal even before (or without ever) spending an AI call on full evaluation.
+const STOPWORDS = new Set([
+    'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'to', 'of', 'in', 'on',
+    'at', 'for', 'with', 'and', 'or', 'but', 'it', 'its', 'this', 'that', 'these', 'those', 'as',
+    'by', 'from', 'can', 'will', 'would', 'should', 'could', 'which', 'what', 'when', 'where',
+    'how', 'why', 'not', 'no', 'do', 'does', 'did', 'has', 'have', 'had', 'if', 'then', 'than',
+    'so', 'such', 'also', 'you', 'your', 'we', 'our', 'i', 'they', 'their', 'them', 'into', 'about',
+]);
+
+function extractKeywords(text) {
+    return [...new Set(
+        (text || '')
+            .toLowerCase()
+            .replace(/[^a-z0-9\s]/g, ' ')
+            .split(/\s+/)
+            .filter(w => w.length > 2 && !STOPWORDS.has(w))
+    )];
+}
+
+function computeKeywordMatch(userAnswer, modelAnswer) {
+    const modelKeywords = extractKeywords(modelAnswer);
+    if (modelKeywords.length === 0 || !userAnswer?.trim()) return null;
+    const userLower = userAnswer.toLowerCase();
+    const matched = modelKeywords.filter(kw => userLower.includes(kw));
+    return {
+        score: Math.round((matched.length / modelKeywords.length) * 100),
+        matched: matched.length,
+        total: modelKeywords.length,
+    };
+}
+
+// No dedicated "round" field exists on questions — rounds are derived from the existing
+// `type`/`difficulty` columns instead of requiring a schema change + re-tagging every
+// question. `match` decides which questions belong to a given round.
+const ROUNDS = [
+    {
+        id: 'screening',
+        label: '1st Round · Screening',
+        icon: '📋',
+        desc: 'Foundational MCQs & theory basics',
+        match: (q) => ['mcq', 'theory'].includes(q.type),
+    },
+    {
+        id: 'technical',
+        label: '2nd Round · Technical',
+        icon: '💻',
+        desc: 'In-depth theory & coding questions',
+        match: (q) => ['theory', 'coding'].includes(q.type),
+    },
+    {
+        id: 'manager',
+        label: 'Final Round · Manager',
+        icon: '🎯',
+        desc: 'Advanced coding & decision-making questions',
+        match: (q) => q.type === 'coding' || (q.type === 'interview' && q.difficulty === 'experienced'),
+    },
+    {
+        id: 'hr',
+        label: 'HR Round',
+        icon: '👔',
+        desc: 'Behavioural & soft-skill questions',
+        match: (q) => q.type === 'interview',
+    },
 ];
 
 const EXP_LEVELS = [
@@ -31,6 +91,10 @@ const EXP_LEVELS = [
     { value: 'mid_level', label: 'Mid-Level (3–6 yrs)' },
     { value: 'senior', label: 'Senior (6+ yrs)' },
 ];
+
+const SPEECH_RECOGNITION_CTOR =
+    typeof window !== 'undefined' ? window.SpeechRecognition || window.webkitSpeechRecognition : null;
+const SPEECH_SYNTHESIS_SUPPORTED = typeof window !== 'undefined' && !!window.speechSynthesis;
 
 function ScoreRing({ score }) {
     const color = score >= 70 ? '#22c55e' : score >= 40 ? '#f59e0b' : '#ef4444';
@@ -51,8 +115,8 @@ function ScoreRing({ score }) {
 }
 
 export default function MockInterviewPage() {
-    const [phase, setPhase] = useState('setup');
-    const [config, setConfig] = useState({ topic_id: 'all', exp_level: 'junior', mode: 'technical', count: 10 });
+    const [phase, setPhase] = useState('setup-tech');
+    const [config, setConfig] = useState({ topic_ids: [], exp_level: 'junior', round: 'technical', count: 10 });
     const [questions, setQuestions] = useState([]);
     const [current, setCurrent] = useState(0);
     const [userAnswers, setUserAnswers] = useState({});
@@ -62,6 +126,9 @@ export default function MockInterviewPage() {
     const [selfRatings, setSelfRatings] = useState({});
     const [showModelAnswer, setShowModelAnswer] = useState(false);
     const [loadingFeedback, setLoadingFeedback] = useState(false);
+    const [isSpeaking, setIsSpeaking] = useState(false);
+    const [isRecording, setIsRecording] = useState(false);
+    const recognitionRef = useRef(null);
 
     const { data: topics = [] } = useQuery({
         queryKey: ['topics'],
@@ -79,16 +146,43 @@ export default function MockInterviewPage() {
         return () => clearInterval(interval);
     }, [phase]);
 
+    // Stop any in-flight speech/recording when the question changes or the page leaves
+    // the interview phase — a stale utterance/recognition session should never carry over.
+    useEffect(() => {
+        return () => {
+            if (SPEECH_SYNTHESIS_SUPPORTED) window.speechSynthesis.cancel();
+            recognitionRef.current?.stop();
+        };
+    }, [current, phase]);
+
     const formatTime = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 
+    const visibleQs = useMemo(
+        () => allQs.filter(q => q.is_visible !== false && q.status === 'published'),
+        [allQs]
+    );
+
+    const techFilteredQs = useMemo(() => {
+        if (config.topic_ids.length === 0) return visibleQs;
+        return visibleQs.filter(q => config.topic_ids.includes(q.topic_id));
+    }, [visibleQs, config.topic_ids]);
+
     const pool = useMemo(() => {
-        let qs = allQs.filter(q => q.is_visible !== false && q.status === 'published');
-        if (config.topic_id !== 'all') qs = qs.filter(q => q.topic_id === config.topic_id);
+        let qs = techFilteredQs;
         if (config.exp_level !== 'all') qs = qs.filter(q => q.experience_level === config.exp_level || !q.experience_level);
-        if (config.mode === 'technical') qs = qs.filter(q => ['theory', 'coding', 'scenario'].includes(q.type));
-        if (config.mode === 'hr') qs = qs.filter(q => ['interview', 'scenario'].includes(q.type));
+        const round = ROUNDS.find(r => r.id === config.round);
+        if (round) qs = qs.filter(round.match);
         return qs;
-    }, [allQs, config]);
+    }, [techFilteredQs, config.exp_level, config.round]);
+
+    const toggleTopic = (topicId) => {
+        setConfig(c => ({
+            ...c,
+            topic_ids: c.topic_ids.includes(topicId)
+                ? c.topic_ids.filter(id => id !== topicId)
+                : [...c.topic_ids, topicId],
+        }));
+    };
 
     const startInterview = () => {
         const shuffled = [...pool].sort(() => Math.random() - 0.5).slice(0, Math.min(config.count, pool.length));
@@ -105,6 +199,73 @@ export default function MockInterviewPage() {
     const q = questions[current];
     const progressPct = questions.length > 0 ? ((current + 1) / questions.length) * 100 : 0;
 
+    // Free instant signal, recomputed on every keystroke — no AI call involved.
+    const keywordMatch = useMemo(
+        () => (q ? computeKeywordMatch(userAnswers[q.id], q.answer || q.explanation) : null),
+        [q, userAnswers]
+    );
+
+    const speakQuestion = () => {
+        if (!SPEECH_SYNTHESIS_SUPPORTED || !q) return;
+        window.speechSynthesis.cancel();
+        if (isSpeaking) {
+            setIsSpeaking(false);
+            return;
+        }
+        const text = [q.title, q.description].filter(Boolean).join('. ');
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.onend = () => setIsSpeaking(false);
+        utterance.onerror = () => setIsSpeaking(false);
+        window.speechSynthesis.speak(utterance);
+        setIsSpeaking(true);
+    };
+
+    const toggleRecording = () => {
+        if (!SPEECH_RECOGNITION_CTOR || !q) {
+            toast.error('Voice input is not supported in this browser. Try Chrome or Edge.');
+            return;
+        }
+        if (isRecording) {
+            recognitionRef.current?.stop();
+            return;
+        }
+
+        const recognition = new SPEECH_RECOGNITION_CTOR();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = 'en-US';
+
+        const baseText = userAnswers[q.id]?.trim() ? userAnswers[q.id].trim() + ' ' : '';
+        let finalTranscript = baseText;
+
+        recognition.onresult = (event) => {
+            let interim = '';
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+                const transcript = event.results[i][0].transcript;
+                if (event.results[i].isFinal) {
+                    finalTranscript += transcript + ' ';
+                } else {
+                    interim += transcript;
+                }
+            }
+            setUserAnswers(prev => ({ ...prev, [q.id]: finalTranscript + interim }));
+        };
+
+        recognition.onerror = (event) => {
+            if (event.error === 'not-allowed' || event.error === 'permission-denied') {
+                toast.error('Microphone access was denied.');
+            } else if (event.error !== 'no-speech' && event.error !== 'aborted') {
+                toast.error('Voice recognition error. Please try again.');
+            }
+        };
+
+        recognition.onend = () => setIsRecording(false);
+
+        recognitionRef.current = recognition;
+        recognition.start();
+        setIsRecording(true);
+    };
+
     const getAIFeedback = async () => {
         const answer = userAnswers[q.id];
         if (!answer || answer.trim().length < 5) {
@@ -113,24 +274,20 @@ export default function MockInterviewPage() {
         }
         setLoadingFeedback(true);
         try {
-            const prompt = `You are an expert technical interviewer. Evaluate this interview answer.
-
+            // Kept deliberately short — this is a supplementary pass on top of the free
+            // keyword-coverage check above, not the sole evaluation, so it doesn't need a
+            // long prompt or a big response budget.
+            const prompt = `Interviewer, evaluate this answer in under 60 words total.
 Question: "${q.title}"
-${q.description ? `Context: ${q.description}` : ''}
-${q.answer ? `Expected Answer: ${q.answer}` : ''}
+${q.answer ? `Expected: ${q.answer}` : ''}
+Answer: "${answer}"
 
-Candidate's Answer: "${answer}"
+Reply in exactly this format:
+Score: <0-100>
+Verdict: Strong | Acceptable | Needs Work
+Tip: <one short sentence>`;
 
-Provide a concise evaluation with:
-1. **Score** (0–100): Just the number
-2. **Verdict**: "Strong", "Acceptable", or "Needs Work"  
-3. **What was good**: 1–2 bullet points
-4. **What's missing**: 1–2 bullet points  
-5. **Key tip**: One specific improvement suggestion
-
-Keep the entire response under 150 words. Be honest and constructive.`;
-
-            const result = await invokeLLM({ prompt });
+            const result = await invokeGroq({ prompt, maxTokens: 120 });
             setAiFeedback(prev => ({ ...prev, [q.id]: result }));
 
             // Auto-rate based on AI verdict
@@ -140,7 +297,7 @@ Keep the entire response under 150 words. Be honest and constructive.`;
             } else if (lower.includes('needs work') || lower.includes('missing') || lower.includes('weak')) {
                 setSelfRatings(prev => ({ ...prev, [q.id]: 'review' }));
             }
-        } catch (err) {
+        } catch {
             toast.error('Failed to get AI feedback. Please try again.');
         } finally {
             setLoadingFeedback(false);
@@ -165,8 +322,8 @@ Keep the entire response under 150 words. Be honest and constructive.`;
     const goodAnswers = Object.values(selfRatings).filter(r => r === 'good').length;
     const avgRating = questions.length > 0 ? Math.round((goodAnswers / questions.length) * 100) : 0;
 
-    // ---- SETUP ----
-    if (phase === 'setup') return (
+    // ---- SETUP: TECHNOLOGIES ----
+    if (phase === 'setup-tech') return (
         <div className="space-y-6 max-w-2xl">
             <PageHeader title="Mock Interview" badge="Practice Mode" description="Simulate a real interview. Get AI feedback on every answer." />
             <Card className="rounded-3xl overflow-hidden border border-border shadow-lg">
@@ -174,39 +331,28 @@ Keep the entire response under 150 words. Be honest and constructive.`;
                 <CardContent className="p-8 space-y-6">
                     <div className="flex items-center gap-3">
                         <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center">
-                            <Mic className="w-6 h-6 text-primary" />
+                            <Brain className="w-6 h-6 text-primary" />
                         </div>
                         <div>
-                            <h2 className="font-bold text-lg font-heading">Configure Your Session</h2>
-                            <p className="text-sm text-muted-foreground">AI will evaluate every answer you give</p>
+                            <h2 className="font-bold text-lg font-heading">Choose Your Technologies</h2>
+                            <p className="text-sm text-muted-foreground">Pick one or more — leave blank for all topics</p>
                         </div>
                     </div>
 
                     <div>
-                        <label className="text-sm font-semibold mb-3 block">Interview Mode</label>
-                        <div className="space-y-2">
-                            {MODES.map(m => (
-                                <button key={m.id} onClick={() => setConfig(c => ({ ...c, mode: m.id }))}
-                                    className={`w-full text-left px-4 py-3.5 rounded-xl border-2 transition-all ${config.mode === m.id ? 'border-primary bg-primary/5 shadow-sm' : 'border-border hover:border-primary/40'
+                        <label className="text-sm font-semibold mb-3 block">Technologies</label>
+                        <div className="flex flex-wrap gap-2">
+                            {topics.filter(t => t.is_visible !== false).map(t => (
+                                <button key={t.id} onClick={() => toggleTopic(t.id)}
+                                    className={`px-3.5 py-2 rounded-xl text-sm font-medium border-2 transition-all ${config.topic_ids.includes(t.id) ? 'bg-primary text-primary-foreground border-primary' : 'border-border hover:border-primary/50'
                                         }`}>
-                                    <p className="font-semibold text-sm">{m.label}</p>
-                                    <p className="text-xs text-muted-foreground mt-0.5">{m.desc}</p>
+                                    {t.name}
                                 </button>
                             ))}
                         </div>
-                    </div>
-
-                    <div>
-                        <label className="text-sm font-semibold mb-2 block">Topic</label>
-                        <Select value={config.topic_id} onValueChange={v => setConfig(c => ({ ...c, topic_id: v }))}>
-                            <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="all">🌐 All Topics</SelectItem>
-                                {topics.filter(t => t.is_visible !== false).map(t => (
-                                    <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
+                        {config.topic_ids.length === 0 && (
+                            <p className="text-xs text-muted-foreground mt-2">🌐 No selection = all topics included</p>
+                        )}
                     </div>
 
                     <div>
@@ -231,19 +377,60 @@ Keep the entire response under 150 words. Be honest and constructive.`;
                         </div>
                     </div>
 
+                    <Button onClick={() => setPhase('setup-round')} className="w-full rounded-xl h-12 text-base font-bold shadow-lg">
+                        Next: Choose Round <ChevronRight className="w-5 h-5 ml-1" />
+                    </Button>
+                </CardContent>
+            </Card>
+        </div>
+    );
+
+    // ---- SETUP: ROUND ----
+    if (phase === 'setup-round') return (
+        <div className="space-y-6 max-w-2xl">
+            <PageHeader title="Mock Interview" badge="Practice Mode" description="Which round do you want to simulate?" />
+            <Card className="rounded-3xl overflow-hidden border border-border shadow-lg">
+                <div className="h-1 bg-gradient-to-r from-primary via-violet-500 to-pink-500" />
+                <CardContent className="p-8 space-y-6">
+                    <div className="flex items-center gap-3">
+                        <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center">
+                            <Mic className="w-6 h-6 text-primary" />
+                        </div>
+                        <div>
+                            <h2 className="font-bold text-lg font-heading">Choose Interview Round</h2>
+                            <p className="text-sm text-muted-foreground">Questions are matched to the round you pick</p>
+                        </div>
+                    </div>
+
+                    <div className="space-y-2">
+                        {ROUNDS.map(r => (
+                            <button key={r.id} onClick={() => setConfig(c => ({ ...c, round: r.id }))}
+                                className={`w-full text-left px-4 py-3.5 rounded-xl border-2 transition-all ${config.round === r.id ? 'border-primary bg-primary/5 shadow-sm' : 'border-border hover:border-primary/40'
+                                    }`}>
+                                <p className="font-semibold text-sm">{r.icon} {r.label}</p>
+                                <p className="text-xs text-muted-foreground mt-0.5">{r.desc}</p>
+                            </button>
+                        ))}
+                    </div>
+
                     <div className="bg-muted/60 rounded-2xl p-4 flex items-center gap-3">
                         <Sparkles className="w-5 h-5 text-primary flex-shrink-0" />
                         <div>
                             <p className="text-sm font-medium">
                                 <span className="text-primary font-bold">{pool.length}</span> questions match · AI feedback on every answer
                             </p>
-                            <p className="text-xs text-muted-foreground mt-0.5">Type your answer → click "Get AI Feedback" → reveal model answer → rate yourself</p>
+                            <p className="text-xs text-muted-foreground mt-0.5">Type or speak your answer → click the speaker icon to hear the question read aloud</p>
                         </div>
                     </div>
 
-                    <Button onClick={startInterview} className="w-full rounded-xl h-12 text-base font-bold shadow-lg" disabled={pool.length === 0}>
-                        <Mic className="w-5 h-5 mr-2" /> Start Interview
-                    </Button>
+                    <div className="flex gap-3">
+                        <Button variant="outline" onClick={() => setPhase('setup-tech')} className="rounded-xl h-12">
+                            <ChevronLeft className="w-5 h-5 mr-1" /> Back
+                        </Button>
+                        <Button onClick={startInterview} className="flex-1 rounded-xl h-12 text-base font-bold shadow-lg" disabled={pool.length === 0}>
+                            <Mic className="w-5 h-5 mr-2" /> Start Interview
+                        </Button>
+                    </div>
                 </CardContent>
             </Card>
         </div>
@@ -283,7 +470,18 @@ Keep the entire response under 150 words. Be honest and constructive.`;
                                         </Badge>
                                     )}
                                 </div>
-                                <h3 className="text-lg font-bold leading-snug font-heading">{q.title}</h3>
+                                <div className="flex items-start gap-2">
+                                    <h3 className="text-lg font-bold leading-snug font-heading flex-1">{q.title}</h3>
+                                    {SPEECH_SYNTHESIS_SUPPORTED && (
+                                        <button
+                                            onClick={speakQuestion}
+                                            title={isSpeaking ? 'Stop reading' : 'Read question aloud'}
+                                            className={`flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center border-2 transition-all ${isSpeaking ? 'bg-primary text-primary-foreground border-primary' : 'border-border hover:border-primary/50 text-muted-foreground hover:text-primary'
+                                                }`}>
+                                            {isSpeaking ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+                                        </button>
+                                    )}
+                                </div>
                                 {q.description && <p className="text-sm text-muted-foreground mt-1.5 leading-relaxed">{q.description}</p>}
                             </div>
 
@@ -292,13 +490,40 @@ Keep the entire response under 150 words. Be honest and constructive.`;
                             )}
 
                             <div className="space-y-2">
-                                <label className="text-xs font-bold text-muted-foreground uppercase tracking-widest block">Your Answer</label>
+                                <div className="flex items-center justify-between">
+                                    <label className="text-xs font-bold text-muted-foreground uppercase tracking-widest block">Your Answer</label>
+                                    {SPEECH_RECOGNITION_CTOR ? (
+                                        <button
+                                            onClick={toggleRecording}
+                                            className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full border transition-all ${isRecording ? 'bg-red-500/10 border-red-500/40 text-red-600' : 'border-border text-muted-foreground hover:text-primary hover:border-primary/40'
+                                                }`}>
+                                            {isRecording
+                                                ? <><span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" /> Recording… tap to stop</>
+                                                : <><Mic className="w-3 h-3" /> Speak your answer</>}
+                                        </button>
+                                    ) : (
+                                        <span className="text-[10px] text-muted-foreground">Voice input needs Chrome/Edge</span>
+                                    )}
+                                </div>
                                 <Textarea
                                     value={userAnswers[q.id] || ''}
                                     onChange={e => setUserAnswers(prev => ({ ...prev, [q.id]: e.target.value }))}
-                                    placeholder="Type your answer here. Be as detailed as possible — the AI will evaluate it..."
+                                    placeholder="Type your answer, or click 'Speak your answer' above — the AI will evaluate it either way..."
                                     className="rounded-xl min-h-[120px] text-sm resize-none"
                                 />
+                                {keywordMatch && (
+                                    <div className="flex items-center gap-2 text-xs">
+                                        <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                                            <div
+                                                className={`h-full rounded-full transition-all ${keywordMatch.score >= 60 ? 'bg-emerald-500' : keywordMatch.score >= 30 ? 'bg-amber-500' : 'bg-red-500'}`}
+                                                style={{ width: `${keywordMatch.score}%` }}
+                                            />
+                                        </div>
+                                        <span className="text-muted-foreground font-medium flex-shrink-0">
+                                            {keywordMatch.score}% keyword coverage ({keywordMatch.matched}/{keywordMatch.total})
+                                        </span>
+                                    </div>
+                                )}
                             </div>
 
                             <Button
@@ -460,7 +685,7 @@ Keep the entire response under 150 words. Be honest and constructive.`;
                     )}
 
                     <div className="flex gap-3">
-                        <Button variant="outline" onClick={() => setPhase('setup')} className="flex-1 rounded-xl">
+                        <Button variant="outline" onClick={() => setPhase('setup-tech')} className="flex-1 rounded-xl">
                             <RotateCcw className="w-4 h-4 mr-2" /> New Session
                         </Button>
                         <Button onClick={startInterview} className="flex-1 rounded-xl">
