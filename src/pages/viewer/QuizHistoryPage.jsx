@@ -1,6 +1,6 @@
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/api/supabaseClient';
+import { getCurrentUser } from '@/api/auth';
 import { QuizAttempt } from '@/api/entities';
 import PageHeader from '@/components/shared/PageHeader';
 import EmptyState from '@/components/shared/EmptyState';
@@ -15,10 +15,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 export default function QuizHistoryPage() {
     const { data: user } = useQuery({
         queryKey: ['me'],
-        queryFn: async () => {
-            const { data: { user } } = await supabase.auth.getUser();
-            return user;
-        },
+        queryFn: getCurrentUser,
     });
 
     const { data: quizzes = [], isLoading } = useQuery({

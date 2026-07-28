@@ -1,6 +1,6 @@
 import React from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/api/supabaseClient';
+import { getCurrentUser } from '@/api/auth';
 import { Question, Progress, Bookmark, QuizAttempt } from '@/api/entities';
 import PageHeader from '@/components/shared/PageHeader';
 import QuestionCard from '@/components/shared/QuestionCard';
@@ -24,10 +24,7 @@ function EmptyTab({ icon: Icon, title, desc }) {
 export default function RevisionPage() {
     const { data: user } = useQuery({
         queryKey: ['me'],
-        queryFn: async () => {
-            const { data: { user } } = await supabase.auth.getUser();
-            return user;
-        },
+        queryFn: getCurrentUser,
     });
 
     const { data: allQs = [] } = useQuery({

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/api/supabaseClient';
-import { Topic, Question, QuizAttempt } from '@/api/entities';
+import { Topic, Question } from '@/api/entities';
+import { getQuizQuestions, revealQuizAnswer, submitQuiz } from '@/api/quiz';
 import PageHeader from '@/components/shared/PageHeader';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -24,14 +24,6 @@ export default function QuizPage() {
     const [totalTime, setTotalTime] = useState(0);
     const qc = useQueryClient();
 
-    const { data: user } = useQuery({
-        queryKey: ['me'],
-        queryFn: async () => {
-            const { data: { user } } = await supabase.auth.getUser();
-            return user;
-        },
-    });
-
     const { data: topics = [] } = useQuery({
         queryKey: ['topics'],
         queryFn: () => Topic.list(),
@@ -42,12 +34,18 @@ export default function QuizPage() {
         queryFn: () => Question.list('created_at', false),
     });
 
+    // Rough pool-size preview for the setup screen — Question.list() is intentionally
+    // readable by any logged-in viewer (it's the same study content StudyPage shows), so
+    // this preview count carries no extra risk. The actual quiz question set is fetched
+    // separately below with the answer key stripped server-side.
     const mcqPool = useMemo(() => {
         let qs = allQs.filter(q => q.is_visible !== false && q.status === 'published' && q.type === 'mcq' && (q.options?.length >= 2));
         if (config.topic_id !== 'all') qs = qs.filter(q => q.topic_id === config.topic_id);
         if (config.difficulty !== 'all') qs = qs.filter(q => q.difficulty === config.difficulty);
         return qs;
     }, [allQs, config.topic_id, config.difficulty]);
+
+    const [starting, setStarting] = useState(false);
 
     useEffect(() => {
         if (phase !== 'quiz') return;
@@ -57,22 +55,39 @@ export default function QuizPage() {
 
     const formatTime = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 
-    const startQuiz = () => {
+    const startQuiz = async () => {
         if (mcqPool.length === 0) return toast.error('No MCQ questions available for this selection. Add MCQ questions first!');
-        const shuffled = [...mcqPool].sort(() => Math.random() - 0.5).slice(0, Math.min(config.count, mcqPool.length));
-        setQuizQuestions(shuffled);
-        setAnswers([]);
-        setCurrent(0);
-        setSelected(null);
-        setTime(0);
-        setPhase('quiz');
+        setStarting(true);
+        try {
+            const qs = await getQuizQuestions({
+                topic_id: config.topic_id,
+                difficulty: config.difficulty,
+                count: config.count,
+            });
+            if (!qs.length) return toast.error('No MCQ questions available for this selection.');
+            setQuizQuestions(qs);
+            setAnswers([]);
+            setCurrent(0);
+            setSelected(null);
+            setTime(0);
+            setPhase('quiz');
+        } catch (err) {
+            toast.error('Failed to start quiz: ' + err.message);
+        } finally {
+            setStarting(false);
+        }
     };
 
-    const handleAnswer = (optIdx) => {
+    const handleAnswer = async (optIdx) => {
         if (selected !== null) return;
         setSelected(optIdx);
         const q = quizQuestions[current];
-        const isCorrect = optIdx === q.correct_option_index;
+
+        // Revealed only now, one question at a time — never known in advance.
+        const { correct_option_index } = await revealQuizAnswer(q.id);
+        setQuizQuestions(qs => qs.map((qq, i) => (i === current ? { ...qq, correct_option_index } : qq)));
+        const isCorrect = optIdx === correct_option_index;
+
         setTimeout(() => {
             const newAnswers = [...answers, { question_id: q.id, selected_answer: optIdx, is_correct: isCorrect }];
             setAnswers(newAnswers);
@@ -88,22 +103,12 @@ export default function QuizPage() {
     };
 
     const saveResult = async (finalAnswers) => {
-        if (!user?.id) return;
-        const correct = finalAnswers.filter(a => a.is_correct).length;
-        const pct = Math.round((correct / quizQuestions.length) * 100);
-        const topic = topics.find(t => t.id === config.topic_id);
         try {
-            await QuizAttempt.create({
-                user_id: user.id,
+            await submitQuiz({
                 topic_id: config.topic_id === 'all' ? null : config.topic_id,
-                topic_name: config.topic_id === 'all' ? 'Mixed' : topic?.name || '',
                 difficulty: config.difficulty,
-                total_questions: quizQuestions.length,
-                correct_answers: correct,
-                wrong_answers: quizQuestions.length - correct,
-                score_percentage: pct,
                 time_taken: time,
-                answers: finalAnswers,
+                answers: finalAnswers.map(a => ({ question_id: a.question_id, selected_option_index: a.selected_answer })),
             });
             qc.invalidateQueries({ queryKey: ['quizAttempts'] });
         } catch (err) {
@@ -208,8 +213,8 @@ export default function QuizPage() {
                         <p><span className="font-semibold text-foreground">{mcqPool.length}</span> MCQ questions match your selection</p>
                     </div>
 
-                    <Button onClick={startQuiz} className="w-full rounded-xl h-12 text-base font-bold shadow-lg" disabled={mcqPool.length === 0}>
-                        <Zap className="w-5 h-5 mr-2" /> Start Quiz!
+                    <Button onClick={startQuiz} className="w-full rounded-xl h-12 text-base font-bold shadow-lg" disabled={mcqPool.length === 0 || starting}>
+                        <Zap className="w-5 h-5 mr-2" /> {starting ? 'Loading…' : 'Start Quiz!'}
                     </Button>
                 </CardContent>
             </Card>

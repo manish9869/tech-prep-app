@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/api/supabaseClient'
+import { getCurrentUser } from '@/api/auth'
+import { Topic, Question, Progress as ProgressEntity, Bookmark as BookmarkEntity, Note as NoteEntity } from '@/api/entities'
 import DifficultyBadge from '@/components/shared/DifficultyBadge';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -17,62 +18,6 @@ import {
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
-import { updateStreak } from '@/lib/updateStreak';
-// ── Supabase helpers ──────────────────────────────────────────────────────────
-
-const getUser = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return null;
-    const { data: profile } = await supabase
-        .from('profiles')
-        .select('*, current_streak, longest_streak, last_study_date')
-        .eq('id', user.id)
-        .single();
-    return profile ?? user;
-};
-
-const getTopics = async () => {
-    const { data, error } = await supabase.from('topics').select('*');
-    if (error) throw error;
-    return data ?? [];
-};
-
-const getQuestions = async () => {
-    const { data, error } = await supabase
-        .from('questions')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(500);
-    if (error) throw error;
-    return data ?? [];
-};
-
-const getProgress = async (userId) => {
-    const { data, error } = await supabase
-        .from('progress')
-        .select('*')
-        .eq('user_id', userId);
-    if (error) throw error;
-    return data ?? [];
-};
-
-const getBookmarks = async (userId) => {
-    const { data, error } = await supabase
-        .from('bookmarks')
-        .select('*')
-        .eq('user_id', userId);
-    if (error) throw error;
-    return data ?? [];
-};
-
-const getNotes = async (userId) => {
-    const { data, error } = await supabase
-        .from('notes')
-        .select('*')
-        .eq('user_id', userId);
-    if (error) throw error;
-    return data ?? [];
-};
 
 // ── QuestionRow ───────────────────────────────────────────────────────────────
 
@@ -83,21 +28,12 @@ function QuestionRow({ q, isCompleted, isBookmarked, note, onBookmark, onComplet
     const [noteText, setNoteText] = useState(note?.content || '');
     const qc = useQueryClient();
 
-    const { data: user } = useQuery({ queryKey: ['me'], queryFn: getUser });
-
     const saveNoteMut = useMutation({
         mutationFn: async () => {
             if (note) {
-                const { error } = await supabase
-                    .from('notes')
-                    .update({ content: noteText })
-                    .eq('id', note.id);
-                if (error) throw error;
+                await NoteEntity.update(note.id, { content: noteText });
             } else {
-                const { error } = await supabase
-                    .from('notes')
-                    .insert({ user_id: user.id, question_id: q.id, content: noteText });
-                if (error) throw error;
+                await NoteEntity.create({ question_id: q.id, content: noteText });
             }
         },
         onSuccess: () => {
@@ -109,8 +45,7 @@ function QuestionRow({ q, isCompleted, isBookmarked, note, onBookmark, onComplet
 
     const deleteNoteMut = useMutation({
         mutationFn: async () => {
-            const { error } = await supabase.from('notes').delete().eq('id', note.id);
-            if (error) throw error;
+            await NoteEntity.delete(note.id);
         },
         onSuccess: () => {
             qc.invalidateQueries({ queryKey: ['notes'] });
@@ -340,35 +275,35 @@ export default function StudyPage() {
     const [search, setSearch] = useState('');
     const qc = useQueryClient();
 
-    const { data: user } = useQuery({ queryKey: ['me'], queryFn: getUser });
+    const { data: user } = useQuery({ queryKey: ['me'], queryFn: getCurrentUser });
 
     const { data: allTopics = [] } = useQuery({
         queryKey: ['topics'],
-        queryFn: getTopics,
+        queryFn: () => Topic.list(),
     });
 
     const topic = allTopics.find(t => t.id === topicId);
 
     const { data: allQuestions = [] } = useQuery({
         queryKey: ['questions'],
-        queryFn: getQuestions,
+        queryFn: () => Question.list('created_at', false),
     });
 
     const { data: progress = [] } = useQuery({
         queryKey: ['progress', user?.id],
-        queryFn: () => getProgress(user.id),
+        queryFn: () => ProgressEntity.filter({ user_id: user.id }),
         enabled: !!user?.id,
     });
 
     const { data: bookmarks = [] } = useQuery({
         queryKey: ['bookmarks', user?.id],
-        queryFn: () => getBookmarks(user.id),
+        queryFn: () => BookmarkEntity.filter({ user_id: user.id }),
         enabled: !!user?.id,
     });
 
     const { data: notes = [] } = useQuery({
         queryKey: ['notes', user?.id],
-        queryFn: () => getNotes(user.id),
+        queryFn: () => NoteEntity.filter({ user_id: user.id }),
         enabled: !!user?.id,
     });
 
@@ -396,18 +331,16 @@ export default function StudyPage() {
 
     const completeMut = useMutation({
         mutationFn: async (qId) => {
-            const { error } = await supabase.from('progress').insert({
-                user_id: user.id,
+            // Streak is bumped server-side, atomically with this insert — no client call needed.
+            await ProgressEntity.create({
                 question_id: qId,
                 topic_id: topicId,
                 completed_at: new Date().toISOString(),
             });
-            if (error) throw error;
-            await updateStreak(user.id);
         },
         onSuccess: () => {
             qc.invalidateQueries({ queryKey: ['progress'] });
-            qc.invalidateQueries({ queryKey: ['me'] }); // ← ADD THIS
+            qc.invalidateQueries({ queryKey: ['me'] });
             toast.success('✅ Marked as done!');
         },
     });
@@ -416,8 +349,7 @@ export default function StudyPage() {
         mutationFn: async (qId) => {
             const p = progress.find(x => x.question_id === qId);
             if (!p) return;
-            const { error } = await supabase.from('progress').delete().eq('id', p.id);
-            if (error) throw error;
+            await ProgressEntity.delete(p.id);
         },
         onSuccess: () => qc.invalidateQueries({ queryKey: ['progress'] }),
         onError: () => toast.error('Failed to undo'),
@@ -427,17 +359,14 @@ export default function StudyPage() {
         mutationFn: async (q) => {
             const bm = bookmarks.find(b => b.question_id === q.id);
             if (bm) {
-                const { error } = await supabase.from('bookmarks').delete().eq('id', bm.id);
-                if (error) throw error;
+                await BookmarkEntity.delete(bm.id);
             } else {
-                const { error } = await supabase.from('bookmarks').insert({
-                    user_id: user.id,
+                await BookmarkEntity.create({
                     question_id: q.id,
                     question_title: q.title,
                     topic_name: topic?.name,
                     difficulty: q.difficulty,
                 });
-                if (error) throw error;
             }
         },
         onSuccess: () => qc.invalidateQueries({ queryKey: ['bookmarks'] }),

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/api/supabaseClient';
+import { getCurrentUser } from '@/api/auth';
 import PageHeader from '@/components/shared/PageHeader';
 import { Upload, BarChart2, Brain, Sparkles, CheckCircle2 } from 'lucide-react';
 import ResumeUploadPanel from '@/components/resume/ResumeUploadPanel';
@@ -22,10 +22,7 @@ export default function ResumeAnalyzerPage() {
 
     const { data: user } = useQuery({
         queryKey: ['me'],
-        queryFn: async () => {
-            const { data: { user } } = await supabase.auth.getUser();
-            return user;
-        },
+        queryFn: getCurrentUser,
     });
 
     const handleAnalysisComplete = (data) => {

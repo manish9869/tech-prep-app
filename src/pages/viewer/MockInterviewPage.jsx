@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/api/supabaseClient';
 import { invokeLLM } from '@/api/llm';
 import { Topic, Question } from '@/api/entities';
 import PageHeader from '@/components/shared/PageHeader';
