@@ -24,6 +24,14 @@ export const AuthProvider = ({ children }) => {
     }
 
     useEffect(() => {
+        // OAuthComplete owns establishing the session on that page (it sets the access
+        // token straight from the redirect URL) — this effect running concurrently on the
+        // same fresh page load would race it: if the cookie-based refresh below fails first,
+        // its failure path clears the access token OAuthComplete just set out from under it.
+        if (window.location.pathname === '/oauth-complete') {
+            setIsLoadingAuth(false)
+            return
+        }
         // Silently exchange the httpOnly refresh cookie (if any) for a fresh access token
         // on every app load — this is what keeps a user logged in across a hard refresh.
         (async () => {
