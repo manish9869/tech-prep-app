@@ -1,0 +1,34 @@
+language: en-US
+early_access: false
+
+reviews:
+  profile: chill
+  auto_review:
+    enabled: true
+    drafts: false
+  # Advisory only — CodeRabbit posts a review with comments but does not
+  # formally "Request changes" on the PR, so it never blocks the merge
+  # button. The human reviewer (repo owner) is the one who approves/merges.
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+  path_filters:
+    - "!dist/**"
+    - "!build/**"
+    - "!node_modules/**"
+    - "!**/*.lock"
+    - "!package-lock.json"
+    - "!**/*.min.js"
+  path_instructions:
+    - path: "src/**/*.{js,jsx,ts,tsx}"
+      instructions: >
+        This is a Vite + React frontend. Flag missing dependency arrays in
+        useEffect/useMemo/useCallback, unhandled promise rejections, direct
+        DOM/localStorage access for auth tokens (tokens must stay in memory,
+        never localStorage), and components missing loading/error states for
+        async data.
+
+chat:
+  auto_reply: true
